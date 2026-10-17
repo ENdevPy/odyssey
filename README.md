@@ -24,18 +24,38 @@ Shortest / Balanced routes with plain-English, honest explanations.
 
 ```bash
 cd odyssey-app
-python3 -m http.server 8000      # open http://localhost:8000
+python3 -m http.server 8000      # Windows: py -m http.server 8000
 ```
+
+Open http://localhost:8000. Don't open `index.html` by double-clicking: the browser blocks the data and the map stays empty.
+
+### On a phone
+
+Phones only share GPS with https sites, so publish it with GitHub Pages (free): repo **Settings > Pages > Deploy from a branch > main > / (root) > Save**. A few minutes later the app is at `https://<username>.github.io/odyssey/odyssey-app/`. Open it once on Wi-Fi (about 23 MB of map data), then:
+
+- **iPhone (Safari):** Share > Add to Home Screen.
+- **Android (Chrome):** menu > Install app, or About in the app > Add Odyssey to your home screen.
+
+It then opens full-screen like an installed app and works offline (live tide, flood warnings and place search need a connection and say so when offline).
 
 Refresh every data source and retrain the model (~4 minutes):
 
 ```bash
-cd ../odyssey-city-data
+cd odyssey-city-data
 python3 build_odyssey_data.py
 cp entities/*.json ../odyssey-app/data/
 ```
 
-Run the routing tests on the real data: `node odyssey-app/test_core.js`.
+Run the routing tests on the real data: `cd odyssey-app && node test_core.js`.
+
+### App files
+
+| File | What it does |
+|---|---|
+| `app.js` | Athena core: graph, routing, model-driven costs, explanations. No interface code, so the tests can load it. |
+| `ui.js` | The interface: map, bottom sheet, search, route cards, path details, Tonight, Help, reports, preferences, welcome screens. |
+| `index.html`, `style.css` | Layout and design (mobile-first, side panel on wide screens). |
+| `manifest.webmanifest`, `sw.js`, `icons/` | Install to home screen and offline support. |
 
 ## What's real (everything)
 
