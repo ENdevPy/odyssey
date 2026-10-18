@@ -21,7 +21,8 @@
 
   // Route labels shown to people. Change the right-hand side to rename a profile
   // everywhere in the interface; the routing core keeps its own names.
-  const LABELS = { Safest: "Safest", Balanced: "Balanced", Shortest: "Shortest" };
+  // "Safest" stays as the internal key; users see "Lower risk" because no route is guaranteed safe
+  const LABELS = { Safest: "Lower risk", Balanced: "Balanced", Shortest: "Shortest" };
   const BAND_TEXT = { low: "Low risk", medium: "Medium risk", high: "High risk", unknown: "Risk unknown" };
   const COLORS = { low: "#34D399", medium: "#FBBF24", high: "#F87171", unknown: "#8592A6" };
   const CRIME_NAMES = {
@@ -73,11 +74,30 @@
   splashBar.style.width = "94%";
   await nextPaint();
 
+  /* Police UK crime was only fetched for these 12 one-mile circles
+   * (POLICE_POINTS in build_odyssey_data.py). Outside them a path has no
+   * crime history, so its model score would look falsely "low". We mark those
+   * paths as risk unknown instead, for the map, the cards and the router. */
+  const CRIME_AREAS = [
+    [50.9362, -1.3957], [50.9285, -1.3995], [50.9045, -1.4025], [50.9085, -1.4115],
+    [50.8998, -1.4005], [50.9040, -1.3930], [50.9215, -1.3905], [50.9245, -1.3780],
+    [50.9200, -1.4045], [50.9105, -1.4325], [50.9055, -1.4600], [50.9165, -1.4650],
+  ];
+  const CRIME_RADIUS_M = 1609;
+  for (const s of segments) {
+    const mid = s.coordinates[Math.floor(s.coordinates.length / 2)];
+    s.crime_covered = CRIME_AREAS.some((p) => distM(mid, p) <= CRIME_RADIUS_M);
+    if (!s.crime_covered && s.risk_band !== "unknown") { s.risk_band = "unknown"; s.risk_score = null; }
+  }
   const graph = buildGraph(segments);
   const walkable = segments.filter((s) => s.highway_type !== "service" && s.length_m >= 10);
   const counts = { low: 0, medium: 0, high: 0, unknown: 0 };
   walkable.forEach((s) => counts[s.risk_band]++);
   const unknownPct = Math.round((counts.unknown / walkable.length) * 100);
+  const lenOf = (arr) => arr.reduce((t, x) => t + (x.length_m || 0), 0);
+  const walkLen = lenOf(walkable);
+  const noLightPct = Math.round((lenOf(walkable.filter((x) => x.lighting === "unknown")) / walkLen) * 100);
+  const noCrimePct = Math.round((lenOf(walkable.filter((x) => !x.crime_covered)) / walkLen) * 100);
   const police = manifest && manifest.sources.find((s) => /police/i.test(s.name));
   const crimeCount = police && police.crimes ? police.crimes : null;
   const monthName = (m) => m ? new Date(m + "-01T12:00:00Z").toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "";
@@ -320,8 +340,8 @@
     const total = walkable.length;
     $("honesty-card").innerHTML =
       `<div class="big">${unknownPct}%</div>` +
-      `<p>of Southampton’s ${total.toLocaleString()} walking paths have no lighting record. ` +
-      `Odyssey shows them as “risk unknown” instead of guessing.</p>` +
+      `<p>of Southampton’s ${total.toLocaleString()} walking paths are shown as “risk unknown” instead of guessed. ` +
+      `${noLightPct}% of the network has no lighting record, and ${noCrimePct}% is outside the area police crime data was fetched for.</p>` +
       `<div class="meter" aria-hidden="true">${["low", "medium", "high", "unknown"].map((b) =>
         `<span style="width:${(counts[b] / total) * 100}%;background:${b === "unknown"
           ? "repeating-linear-gradient(90deg,#8592A6 0 5px,#1F2E4A 5px 9px)" : COLORS[b]}"></span>`).join("")}</div>` +
@@ -357,6 +377,7 @@
   $("open-search").addEventListener("click", () => openSearch());
   $("search-close").addEventListener("click", closeSearch);
 
+  let searchDone = "";   // the last query the online search fully answered
   function renderSuggestions(q, remote = []) {
     q = (q || "").trim().toLowerCase();
     const recent = store.get(recentKey, []);
@@ -369,7 +390,9 @@
       `<button class="row" data-act="pick-to"><span class="row-icon"><svg><use href="#i-pin"/></svg></span>` +
       `<span class="row-text"><span class="row-title">Choose on the map</span><span class="row-sub">Tap where you’re going</span></span></button>`;
     $("suggestions").innerHTML = actions + suggestions.map((p, i) => placeRow(p, i, p.recent ? "i-clock" : p.remote ? "i-search" : "i-pin")).join("") +
-      (q && !suggestions.length ? `<p class="small" style="padding:14px 4px">No matches yet. Keep typing a street, place or postcode.</p>` : "");
+      (q && !suggestions.length ? `<p class="small" style="padding:14px 4px">${searchDone === q
+        ? `No place called “${esc(q)}” found in Southampton. Try a street name or postcode.`
+        : "No matches yet. Keep typing a street, place or postcode."}</p>` : "");
     $("suggestions").querySelectorAll(".row[data-i]").forEach((b) =>
       b.addEventListener("click", () => chooseDestination(suggestions[+b.dataset.i])));
     const pickBtn = $("suggestions").querySelector('[data-act="pick-to"]');
@@ -380,6 +403,7 @@
     renderSuggestions(q);
     clearTimeout(searchTimer);
     if (searchCtrl) searchCtrl.abort();
+    searchDone = "";
     if (q.length < 3) { $("search-status").textContent = ""; return; }
     searchTimer = setTimeout(async () => {
       searchCtrl = new AbortController();
@@ -387,17 +411,22 @@
       $("search-status").textContent = "Searching…";
       try {
         const url = `${NOMINATIM}?format=jsonv2&limit=6&accept-language=en&countrycodes=gb&viewbox=${VIEWBOX}&bounded=1&q=${encodeURIComponent(q)}`;
-        const r = await fetch(url, { signal: searchCtrl.signal }).then((x) => x.json());
+        const res = await fetch(url, { signal: searchCtrl.signal });
+        if (!res.ok) throw Object.assign(new Error("search " + res.status), { server: true });
+        const r = await res.json();
         const remote = (Array.isArray(r) ? r : []).map((x) => {
           const parts = (x.display_name || "").split(",").map((t) => t.trim());
           return { name: parts[0], sub: parts.slice(1, 3).join(", "), ll: [+x.lat, +x.lon], remote: true };
         });
         $("search-status").textContent = "";
-        if ($("dest").value.trim() === q) renderSuggestions(q, remote);
+        if ($("dest").value.trim() === q) { searchDone = q.toLowerCase(); renderSuggestions(q, remote); }
       } catch (e) {
         if (e.name === "AbortError") return;
         $("search-status").className = "status warn";
-        $("search-status").textContent = "Place search needs a connection. Popular places and the map still work.";
+        // say what actually went wrong: no connection is not the same as "not found"
+        $("search-status").textContent = !navigator.onLine || !e.server
+          ? "You’re offline, so place search isn’t available. Popular places, recent places and choosing on the map still work."
+          : "Place search isn’t responding right now. Try again in a moment, or choose on the map.";
       }
     }, 380);
   });
@@ -410,8 +439,17 @@
       rows[activeIdx] && rows[activeIdx].scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const p = suggestions[Math.max(0, activeIdx)];
-      if (p) chooseDestination(p);
+      const q = $("dest").value.trim().toLowerCase();
+      if (activeIdx >= 0 && suggestions[activeIdx]) return chooseDestination(suggestions[activeIdx]);
+      // never pick silently: only go straight to a result when it's the only match,
+      // or the only one whose name matches exactly
+      const exact = suggestions.filter((p) => p.name.toLowerCase() === q);
+      if (suggestions.length === 1 && searchDone === q) return chooseDestination(suggestions[0]);
+      if (exact.length === 1 && suggestions.filter((p) => p.name.toLowerCase() === q).length === 1 && !exact[0].remote) return chooseDestination(exact[0]);
+      $("search-status").className = "status";
+      $("search-status").textContent = !suggestions.length ? (searchDone === q ? "" : "Still searching…")
+        : (suggestions.length > 1 ? `${suggestions.length} places match. Tap the right one below.` : "Is this the place you mean? Tap it below to confirm.");
+      if (rows[0]) { activeIdx = 0; rows[0].setAttribute("aria-selected", "true"); }
     }
   });
 
@@ -469,10 +507,27 @@
   }
 
   /* ---------------------------------------------------------------- planning */
-  let routeLayers = [], lastResults = null, selected = 0, pins = [];
+  let routeLayers = [], lastResults = null, selected = 0, pins = [], lastWaterAvoid = false;
+
+  // throw away the previous route as soon as a new plan starts, so a failed
+  // search never leaves an old route on the map or in the sheet
+  function clearResults() {
+    lastResults = null;
+    drawRoutes();
+    $("cards").innerHTML = "";
+    $("card-dots").innerHTML = "";
+    $("route-detail").innerHTML = "";
+  }
+  function outsideMsg(which, dist) {
+    const km = dist >= 2000 ? ` It’s about ${Math.round(dist / 1000)} km from the nearest path Odyssey knows.` : "";
+    return which === "start"
+      ? `Your start is outside Southampton. Odyssey only covers Southampton.${km} Choose a start point in the city.`
+      : `That destination is outside Southampton. Odyssey only covers Southampton.${km}`;
+  }
 
   async function plan() {
     if (!to) return;
+    clearResults();
     $("dest").blur();
     showView("search");
     $("search-status").className = "status";
@@ -489,17 +544,18 @@
         return;
       }
     }
-    $("search-status").textContent = "Athena is comparing routes…";
+    $("search-status").textContent = "";
+    showSkeleton();
     await nextPaint();
     const a = snap(graph, fromLL), b = snap(graph, to.ll);
     if (a.dist > 400 || b.dist > 400) {
+      clearResults(); showView("search"); setSheet("full");
       $("search-status").className = "status warn";
-      $("search-status").textContent = a.dist > 400
-        ? "Your start is outside the area Odyssey has evidence for. Choose a start point in Southampton."
-        : "That destination is outside the area Odyssey has evidence for. Odyssey covers Southampton.";
+      $("search-status").textContent = a.dist > 400 ? outsideMsg("start", a.dist) : outsideMsg("end", b.dist);
       return;
     }
-    const prefs = loadPrefs();
+    lastWaterAvoid = waterAvoid();
+    const prefs = { ...loadPrefs(), avoid_waterside: lastWaterAvoid };
     const triad = planTriad(graph, a.key, b.key, prefs);
     const results = [];
     if (triad.safest) results.push({ label: "Safest", route: triad.safest, note: triad.safestNote });
@@ -510,6 +566,7 @@
       if (!uniq.some((u) => u.route.segments.map((s) => s.id).join() === r.route.segments.map((s) => s.id).join())) uniq.push(r);
     }
     if (!uniq.length) {
+      clearResults(); showView("search"); setSheet("full");
       $("search-status").className = "status warn";
       $("search-status").textContent = "No walking route found between those points. Try a point nearer a street or path.";
       return;
@@ -521,11 +578,13 @@
       r.factors = explanationFactors(r.route.segments, prefs);
       r.coords = [graph.nodes.get(r.route.steps[0].from).c].concat(r.route.steps.map((st) => graph.nodes.get(st.to).c));
       r.legs = legsOf(r.route);
+      const tot = lenOf(r.route.segments) || 1;
+      r.crimeCover = lenOf(r.route.segments.filter((x) => x.crime_covered)) / tot;
     }
     const shortestR = uniq.find((x) => x.label === "Shortest") || (triad.shortest ? { route: triad.shortest } : null);
     for (const r of uniq) r.gmaps = gmapsLink(r, shortestR);
     for (const r of uniq) r.bullets = bulletsFor(r, uniq);
-    lastResults = { uniq, fromLL, toLL: to.ll, fromName: from.name, toName: to.name };
+    lastResults = { uniq, fromLL, toLL: to.ll, fromName: from.name, toName: to.name, toSub: to.sub && to.sub !== "Popular place" ? to.sub : "" };
     renderResults();
     vibrate(12);
   }
@@ -575,21 +634,37 @@
     const out = [];
     const shortest = uniq.find((x) => x.label === "Shortest");
     const segIds = new Set(r.route.segments.map((x) => x.id));
-    if (r.label === "Shortest" || !shortest) out.push("Most direct route");
+    if (r.label === "Shortest" || !shortest) out.push(["i-walk", "Most direct route", ""]);
     else {
       const d = Math.round(r.stats.minutes - shortest.stats.minutes);
-      out.push(d >= 1 ? `+${d} min vs shortest` : "Same time as shortest");
+      out.push(["i-clock", d >= 1 ? `+${d} min vs shortest` : "Same time as shortest", ""]);
       const avoided = shortest.route.segments.find((x) => !segIds.has(x.id) && (x.risk_band === "high" || x.risk_band === "unknown"));
-      if (avoided) out.push(avoided.lighting === "no" ? "Avoids an unlit path" : avoided.risk_band === "unknown" ? "Avoids a path with no lighting data" : "Avoids a higher-risk path");
+      if (avoided) out.push(["i-check", avoided.lighting === "no" ? "Avoids an unlit path" : avoided.risk_band === "unknown" ? "Avoids a path with unknown risk" : "Avoids a higher-risk path", "good"]);
     }
-    if (r.note) out.push("Best option within a 12 min detour");
+    if (r.note) out.push(["i-check", "Best option within a 12 min detour", "good"]);
     const crimes = r.route.segments.reduce((t, x) => t + (x.crime_count_90d || 0), 0);
-    out.push(crimes ? `${crimes} street crime${crimes > 1 ? "s" : ""} nearby (3 months)` : "No recent street crime recorded");
-    if (r.stats.unknownCount) out.push(`${r.stats.unknownCount} stretch${r.stats.unknownCount > 1 ? "es" : ""} with no lighting data`);
+    const cov = r.crimeCover;
+    if (cov >= 0.95) out.push(crimes ? ["i-alert", `${crimes} street crime${crimes > 1 ? "s" : ""} nearby (3 months)`, crimes >= 20 ? "bad" : ""]
+      : ["i-check", "No recent street crime recorded", "good"]);
+    else if (cov < 0.05) out.push(["i-alert", "No police crime data for this walk", "unk"]);
+    else out.push(["i-alert", `${crimes || "No"} crime${crimes === 1 ? "" : "s"} recorded, but data covers only ${Math.round(cov * 100)}% of the walk`, "unk"]);
+    const noLight = r.route.segments.filter((x) => x.lighting === "unknown").length;
+    if (noLight) out.push(["i-bulb", `${noLight} stretch${noLight > 1 ? "es" : ""} with no lighting data`, "unk"]);
     const haven = havens.find((h) => /24\/7/.test(h.hours) && r.coords.some((c) => distM(c, [h.lat, h.lng]) < 150));
-    if (haven) out.push("Passes a 24/7 staffed place");
-    if (r.route.segments.some((x) => x.tide_exposed)) out.push("Includes a waterside path");
+    if (haven) out.push(["i-shield", "Passes a 24/7 staffed place", "good"]);
+    if (r.route.segments.some((x) => x.tide_exposed)) out.push(lastWaterAvoid ? ["i-wave", "Uses a waterside path while the tide is high", "bad"] : ["i-wave", "Includes a waterside path", ""]);
     return out.slice(0, 4);
+  }
+
+  function showSkeleton() {
+    $("results-to").textContent = to.name;
+    $("results-from").textContent = "Comparing routes…";
+    $("cards").innerHTML = [0, 1].map(() => `<article class="card skeleton" aria-hidden="true"><i class="sk w40"></i><i class="sk w60 tall"></i>` +
+      `<i class="sk w100 thin"></i><i class="sk w80"></i><i class="sk w70"></i><i class="sk w90"></i><i class="sk w100 btnh"></i></article>`).join("");
+    $("card-dots").innerHTML = "";
+    $("route-detail").innerHTML = "";
+    showView("results");
+    setSheet("half");
   }
 
   function legsOf(route) {
@@ -614,7 +689,7 @@
     }
     const summary = ["high", "unknown", "medium"].map((b) => {
       const m = merged.filter((x) => x.band === b).reduce((t, x) => t + x.m, 0);
-      return m >= 20 ? `${Math.round(m)} metres ${b === "unknown" ? "with no lighting data" : b + " risk"}` : "";
+      return m >= 20 ? `${Math.round(m)} metres ${b === "unknown" ? "with unknown risk" : b + " risk"}` : "";
     }).filter(Boolean).join(", ");
     return `<div class="ribbon" role="img" aria-label="Route from start to destination: ${summary || "all low risk"}">` +
       merged.map((x) => `<span class="r-${x.band}" style="flex:${x.m}"></span>`).join("") +
@@ -624,15 +699,16 @@
   function renderResults() {
     const { uniq, fromName, toName } = lastResults;
     $("results-to").textContent = toName;
-    $("results-from").textContent = `From ${fromName}`;
+    $("results-from").textContent = `${lastResults.toSub ? lastResults.toSub + " · " : ""}from ${fromName}`;
     const cards = $("cards");
     cards.innerHTML = uniq.map((r, i) => {
       const st = r.stats;
       return `<article class="card" role="listitem" data-i="${i}" tabindex="0" aria-label="${LABELS[r.label]} route, ${Math.round(st.minutes)} minutes, ${BAND_TEXT[st.band]}. ${esc(r.text)}">` +
         `<div class="card-top"><span class="card-label">${LABELS[r.label]}</span><span class="band ${st.band}">${BAND_TEXT[st.band]}</span></div>` +
-        `<div class="eta"><b>${etaTime(st.minutes)}</b><span>arrive · ${Math.round(st.minutes)} min · ${(st.len / 1000).toFixed(1)} km</span></div>` +
+        `<div class="eta"><b>${Math.round(st.minutes)}</b><span class="eta-unit">min</span>` +
+        `<span class="eta-meta"><span>Arrive ${etaTime(st.minutes)}</span><span>${(st.len / 1000).toFixed(1)} km</span></span></div>` +
         ribbonHTML(r.legs) +
-        `<ul class="card-why">${r.bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` +
+        `<ul class="card-why">${r.bullets.map(([ic, t, tone]) => `<li class="${tone}"><svg><use href="#${ic}"/></svg><span>${esc(t)}</span></li>`).join("")}</ul>` +
         `<div class="actions">` +
         `<a class="btn primary" href="${r.gmaps}" target="_blank" rel="noopener" data-go="${i}"><svg><use href="#i-walk"/></svg>Go</a>` +
         `<button class="btn secondary square" data-share="${i}" aria-label="Share this walk"><svg><use href="#i-share"/></svg></button>` +
@@ -676,12 +752,29 @@
     $("card-dots").querySelectorAll("i").forEach((d, k) => d.classList.toggle("on", k === i));
     if (scroll) {
       const c = $("cards").children[i];
-      $("cards").scrollTo({ left: c.offsetLeft - 16, behavior: "smooth" });
-      ignoreScrollUntil = performance.now() + 600;
+      const target = c.offsetLeft - 16;
+      $("cards").scrollTo({ left: target, behavior: "smooth" });
+      ignoreScrollUntil = performance.now() + 700;
+      // some browsers skip smooth scrolling; make sure the card lands
+      setTimeout(() => { if (Math.abs($("cards").scrollLeft - target) > 4) $("cards").scrollLeft = target; }, 650);
     }
     drawRoutes();
     renderDetail(uniq[i]);
     vibrate(6);
+  }
+
+  // put each time tag where its route is furthest from the others, so tags don't stack
+  function tagSpot(x, i, uniq) {
+    const others = uniq.filter((_, j) => j !== i).flatMap((o) => o.coords.filter((_, k) => k % 3 === 0));
+    let best = x.coords[Math.floor(x.coords.length / 2)], bestD = -1;
+    const n = x.coords.length;
+    for (let k = Math.floor(n * 0.15); k < Math.ceil(n * 0.85); k += Math.max(1, Math.floor(n / 80))) {
+      const c = x.coords[k];
+      let d = Infinity;
+      for (const o of others) { const dd = distM(c, o); if (dd < d) d = dd; if (d < bestD) break; }
+      if (d > bestD) { bestD = d; best = c; }
+    }
+    return best;
   }
 
   function drawRoutes() {
@@ -711,6 +804,15 @@
       icon: L.divIcon({ className: "", html: `<div class="pin ${cls}"></div>`, iconSize: [22, 22], iconAnchor: [11, cls === "end" ? 20 : 11] }),
     }).addTo(map);
     pins = [pin(r.coords[0], "start", "Start"), pin(r.coords[r.coords.length - 1], "end", lastResults.toName)];
+    // time tags on each route, like the big map apps; tap one to pick that route
+    uniq.forEach((x, i) => {
+      const at = tagSpot(x, i, uniq);
+      const tag = L.marker(at, {
+        pane: "pins", keyboard: false, title: `${LABELS[x.label]} route`,
+        icon: L.divIcon({ className: "", html: `<div class="route-tag ${i === selected ? "on" : ""}"><b>${Math.round(x.stats.minutes)} min</b>${i === selected ? `<span>${LABELS[x.label]}</span>` : ""}</div>`, iconSize: null }),
+      }).on("click", (e) => { L.DomEvent.stopPropagation(e); if (i !== selected) selectRoute(i, true); }).addTo(map);
+      pins.push(tag);
+    });
   }
 
   function fitRoutes() {
@@ -726,19 +828,25 @@
     const segs = r.route.segments;
     const crimes = segs.reduce((t, s) => t + (s.crime_count_90d || 0), 0);
     const unknownM = r.legs.filter((l) => l.band === "unknown").reduce((t, l) => t + l.m, 0);
+    const noLightM = lenOf(segs.filter((x) => x.lighting === "unknown"));
+    const noCrimeM = lenOf(segs.filter((x) => !x.crime_covered));
+    const covPct = Math.round(r.crimeCover * 100);
     const highM = r.legs.filter((l) => l.band === "high").reduce((t, l) => t + l.m, 0);
     const passed = havens.filter((h) => r.coords.some((c) => distM(c, [h.lat, h.lng]) < 150));
     const named = [...new Set(segs.map((s) => s.name).filter((n) => n && n !== "unnamed path"))].slice(0, 4);
     const rows = [
       ["Along this route", named.length ? `Via ${named.join(", ")}` : "Mostly unnamed paths", "OpenStreetMap"],
-      ["Reported street crime nearby", crimes ? `${crimes} in the last 3 months on the paths this route uses` : "None recorded on these paths in the last 3 months",
+      ["How routes are ranked", "Lower risk and Balanced keep off paths Athena’s crime model rates higher risk, within a 12 minute detour. Shortest ignores the model.", "Athena model"],
+      ["Reported street crime nearby", (crimes ? `${crimes} in the last 3 months on the paths this route uses` : "None recorded on these paths in the last 3 months") +
+        (covPct < 95 ? `. Police crime data covers only ${covPct}% of this walk, so the real number may be higher.` : ""),
         `Police UK, locations approximate${crimePeriod ? ", " + crimePeriod : ""}`],
       ["Higher-risk stretches", highM >= 10 ? `${Math.round(highM)} m` : "None", "Athena model"],
-      ["Lighting data", unknownM >= 10 ? `Unknown for ${Math.round(unknownM)} m of the walk` : "Known for the whole walk", "OpenStreetMap lit tags"],
+      ["Risk unknown", unknownM >= 10 ? `${Math.round(unknownM)} m of the walk` + [noLightM >= 10 ? `${Math.round(noLightM)} m with no lighting record` : "", noCrimeM >= 10 ? `${Math.round(noCrimeM)} m outside the police data area` : ""].filter(Boolean).map((x, i) => (i ? ", " : ": ") + x).join("") : "None", "OpenStreetMap lit tags, Police UK coverage"],
       ["Staffed places passed", passed.length ? passed.map((h) => `${h.name} (${h.hours})`).join("; ") : "None within 150 m", "Hand-checked list, hours may change"],
     ];
     $("route-detail").innerHTML =
-      (unknownM >= 30 ? `<div class="notice">Lighting data unavailable for ${Math.round(unknownM)} m of this walk, so risk is unknown there.</div>` : "") +
+      (lastWaterAvoid ? `<div class="notice">${live && live.warnings && live.warnings.length ? "A flood warning is active near Southampton" : "The tide is high"}, so routes keep off waterside paths where they can.</div>` : "") +
+      (unknownM >= 30 ? `<div class="notice">Risk is unknown for ${Math.round(unknownM)} m of this walk: no lighting record or no police crime data there.</div>` : "") +
       (r.factors.length ? `<div class="factor-chips" aria-label="Your preferences">${r.factors.map((f) => `<span class="tag">${esc(f)}</span>`).join("")}</div>` : "") +
       `<div class="facts">${rows.map(([l, v, s]) => `<div class="fact"><p class="fact-label">${l}</p><p class="fact-value">${esc(v)}</p><p class="fact-src">${esc(s)}</p></div>`).join("")}</div>` +
       `<p class="tiny" style="margin-top:12px">Risk bands compare routes using recorded data. They aren’t a guarantee. Your maps app may choose a slightly different path.</p>`;
@@ -780,10 +888,11 @@
     const html =
       `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="band ${s.risk_band}">${BAND_TEXT[s.risk_band]}</span>` +
       `<span class="small">${s.length_m} m ${esc(s.highway_type)}</span></div>` +
-      (s.risk_band === "unknown" ? `<div class="notice">Lighting data unavailable, so Odyssey doesn’t score this path. Routes prefer an alternative where one exists.</div>` : "") +
+      (s.risk_band === "unknown" ? `<div class="notice">${!s.crime_covered ? "Police crime data wasn’t fetched for this area" : "No lighting record for this path"}, so Odyssey doesn’t score it. Routes prefer an alternative where one exists.</div>` : "") +
       factsHTML([
         s.risk_score != null ? ["Model estimate", `${Math.round(s.risk_score * 100)}% chance of at least one reported street crime nearby in a month`, "Athena model trained on Police UK records"] : null,
         ["Lighting", esc(lighting), "OpenStreetMap"],
+        !s.crime_covered ? ["Reported street crime nearby", "No data. Police crime records were only fetched for central Southampton, and this path is outside that area.", "Police UK"] :
         ["Reported street crime nearby", `${s.crime_count_90d || 0} in the last 3 months, ${s.crime_count_6m || 0} in 7 months` +
           (cats.length ? `<div class="bars">${cats.map(([k, v]) => `<div class="bar-row"><span>${esc(CRIME_NAMES[k] || k)}</span><span class="bar-track"><span style="width:${(v / maxCat) * 100}%"></span></span><span>${v}</span></div>`).join("")}</div>` : "") +
           (monthVals.some((m) => m[1]) ? `<div class="spark" aria-label="Crimes by month">${monthVals.map(([m, v]) =>
@@ -835,21 +944,28 @@
 
   /* ---------------------------------------------------------------- tonight */
   let live = null;
+  // Near spring high water at Woolston (roughly +1.8 m above datum) waterside
+  // paths can be splashed or closed, so above this level routes avoid them.
+  const TIDE_HIGH_M = 1.5;
+  function waterAvoid() {
+    return !!(live && live.ok && (live.warnings.length || live.level >= TIDE_HIGH_M));
+  }
   async function refreshLive() {
     try {
       const r = await fetch(`https://environment.data.gov.uk/flood-monitoring/id/stations/${EA_TIDE_GAUGE}/readings?latest`).then((x) => x.json());
       const it = r.items[0];
-      const fw = await fetch("https://environment.data.gov.uk/flood-monitoring/id/floods").then((x) => x.json());
-      const hants = (fw.items || []).filter((i) => ["Hampshire", "Southampton"].includes(i.countyName || ""));
-      live = { ok: true, level: it.value, time: new Date(it.dateTime), warnings: hants };
+      // only warnings whose area is within 15 km of the city
+      const fw = await fetch(`${EA_BASE}/id/floods?lat=50.91&long=-1.40&dist=15`).then((x) => x.json());
+      live = { ok: true, level: it.value, time: new Date(it.dateTime), warnings: fw.items || [] };
     } catch (e) {
       const snap = liveSnapshot && liveSnapshot.tide_gauge;
       live = { ok: false, snapshot: snap && snap.value != null ? snap : null };
     }
     const dot = $("live-dot");
-    dot.className = "live-dot" + (live.ok ? (live.warnings.length ? " alert" : " on") : "");
+    dot.className = "live-dot" + (live.ok ? (waterAvoid() ? " alert" : " on") : "");
     $("tonight-label").textContent = live.ok
-      ? (live.warnings.length ? `${live.warnings.length} flood warning${live.warnings.length > 1 ? "s" : ""}` : `Live · Tide ${live.level.toFixed(1)} m`)
+      ? (live.warnings.length ? `${live.warnings.length} flood warning${live.warnings.length > 1 ? "s" : ""}`
+        : waterAvoid() ? `High tide · ${live.level.toFixed(1)} m` : `Live · Tide ${live.level.toFixed(1)} m`)
       : "Tonight";
   }
   refreshLive();
@@ -859,17 +975,21 @@
     const t = (d) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const liveRows = live && live.ok
       ? [["Tide at Woolston", `${live.level.toFixed(2)} m above datum, at ${t(live.time)}`, "Environment Agency, live"],
-        ["Flood warnings", live.warnings.length ? live.warnings.map((w) => esc(w.description || w.severity)).join("<br>") : "None active in Hampshire", "Environment Agency, live"]]
-      : [["Live data", live && live.snapshot ? `Offline. Last tide reading ${live.snapshot.value} m at ${live.snapshot.reading_time.slice(11, 16)} UTC when the data was built.` : "Offline. Live tide and flood data unavailable.", "Environment Agency"]];
+        ["Flood warnings", live.warnings.length ? live.warnings.map((w) => esc(w.description || w.severity)).join("<br>") : "None active within 15 km of Southampton", "Environment Agency, live"],
+        ["Effect on your routes", waterAvoid() ? "Routes are keeping off waterside paths right now." : `Routes keep off waterside paths when the tide is above ${TIDE_HIGH_M} m or a flood warning is active nearby. Neither applies right now.`, "Odyssey"]]
+      : [["Live data", (live && live.snapshot ? `Offline. Last tide reading ${live.snapshot.value} m at ${live.snapshot.reading_time.slice(11, 16)} UTC when the data was built.` : "Offline. Live tide and flood data unavailable.") +
+          " Routes can’t adjust for the tide, so take care on waterside paths.", "Environment Agency"]];
     const ev = model && model.evaluation;
     const sources = manifest ? manifest.sources.map((s) => [esc(s.name), `Updated ${(s.fetched_at || "").slice(0, 10)}`, s.licence]) : [];
     openModal("Tonight in Southampton",
       factsHTML(liveRows) +
       `<h3 class="section">How ratings are made</h3>` +
       factsHTML([
-        ev ? ["Crime model", `Ranks paths by predicted reported street crime. On a month it never saw, it scored ${ev.auc_model} AUC, against ${ev.auc_baseline_recent_crime} for simply using last month’s crime.`,
+        ev ? ["Crime model", `Ranks paths by predicted reported street crime. On a month it never saw, it scored ${ev.auc_model} AUC. ` +
+          (ev.auc_baseline_two_month_rule ? `A simple rule (crimes in the last two months, then path length) scores ${ev.auc_baseline_two_month_rule}, so recent crime does most of the work. ` +
+          `The model matters most on the ${Math.round(ev.share_scored_with_no_recent_crime * 100)}% of paths with no crime in the last two months, where history alone can’t rank them: it scores ${ev.auc_model_no_recent_crime} there.` : ""),
           `Logistic regression on ${crimeCount ? crimeCount.toLocaleString() + " " : ""}Police UK records${crimePeriod ? ", " + crimePeriod : ""}`] : null,
-        ["What we don’t know", `${unknownPct}% of walking paths have no lighting record, so they’re shown as risk unknown and never scored.`, "OpenStreetMap"],
+        ["What we don’t know", `${noLightPct}% of the walking network has no lighting record, and ${noCrimePct}% is outside the 12 areas police crime data was fetched for. Those paths are shown as risk unknown and never scored.`, "OpenStreetMap, Police UK"],
         ["Time of night", "Police data has no time of day, so night-time effects come from lighting and isolation, not from crime timing.", "Model card"],
       ]) +
       (model && model.known_limitations ? `<details style="margin-top:6px"><summary class="small" style="cursor:pointer;padding:8px 0">All known limitations</summary>` +
@@ -878,20 +998,36 @@
   }
   $("btn-tonight").addEventListener("click", openTonight);
 
+  /* iOS/Android settings-style grouped list */
+  function groupHTML(rows) {
+    return `<div class="group">${rows.map((r) => {
+      const tag = r.href ? "a" : "button";
+      const attrs = r.href ? `href="${r.href}" ${r.href.startsWith("tel:") ? "" : 'target="_blank" rel="noopener"'}` : `id="${r.id}"`;
+      return `<${tag} class="g-row" ${attrs}><span class="g-icon ${r.tone || ""}"><svg><use href="#${r.icon}"/></svg></span>` +
+        `<span class="g-text"><span class="g-title">${r.title}</span>${r.sub ? `<span class="g-sub">${r.sub}</span>` : ""}</span>` +
+        `<svg class="g-chev"><use href="#i-chevron"/></svg></${tag}>`;
+    }).join("")}</div>`;
+  }
+
   /* ---------------------------------------------------------------- help */
   function openHelp() {
     openModal("Help",
-      `<div class="stack">` +
-      `<button class="btn danger block" id="h-999">Call 999</button>` +
-      `<a class="btn secondary block" href="tel:101">Call 101 (non-emergency police)</a>` +
-      `<button class="btn secondary block" id="h-share"><svg><use href="#i-share"/></svg>Share my location</button>` +
-      `<a class="btn secondary block" target="_blank" rel="noopener" href="https://www.safeplaces.org.uk/apps/">Find a Safe Place nearby</a>` +
-      `<a class="btn secondary block" target="_blank" rel="noopener" href="https://www.police.uk/streetsafe">Tell police where you feel unsafe</a>` +
-      `</div><p class="small" id="h-msg" style="margin-top:10px"></p>` +
-      `<p class="small" style="margin-top:14px">Odyssey compares routes using public data. It doesn’t track you, contact anyone for you, or send help.</p>` +
-      `<p class="small" style="margin-top:10px">Official guidance: <a style="color:var(--accent)" target="_blank" rel="noopener" href="https://www.gov.uk/contact-999">when to call 999</a>, ` +
-      `<a style="color:var(--accent)" target="_blank" rel="noopener" href="https://www.suzylamplugh.org/pages/categories?category=safety-advice">Suzy Lamplugh Trust</a>, ` +
-      `<a style="color:var(--accent)" target="_blank" rel="noopener" href="https://www.southampton.gov.uk/council-democracy/community-safety/community-safety-team/">Southampton community safety</a>.</p>`,
+      `<button class="sos" id="h-999"><span class="sos-ring"><svg><use href="#i-phone"/></svg></span><span><b>Call 999</b><small>Emergency services</small></span></button>` +
+      `<h3 class="section">Get help</h3>` +
+      groupHTML([
+        { href: "tel:101", icon: "i-phone", title: "Call 101", sub: "Police non-emergency" },
+        { id: "h-share", icon: "i-share", title: "Share my location", sub: "Send a map link to someone" },
+        { href: "https://www.safeplaces.org.uk/apps/", icon: "i-pin", title: "Find a Safe Place", sub: "Official Safe Places app", tone: "blue" },
+      ]) +
+      `<p class="small" id="h-msg" style="margin:8px 4px 0"></p>` +
+      `<h3 class="section">Report and learn</h3>` +
+      groupHTML([
+        { href: "https://www.police.uk/streetsafe", icon: "i-flag", title: "StreetSafe", sub: "Tell police where you feel unsafe, anonymously" },
+        { href: "https://www.gov.uk/contact-999", icon: "i-info", title: "When to call 999", sub: "GOV.UK" },
+        { href: "https://www.suzylamplugh.org/pages/categories?category=safety-advice", icon: "i-book", title: "Personal safety advice", sub: "Suzy Lamplugh Trust" },
+        { href: "https://www.southampton.gov.uk/council-democracy/community-safety/community-safety-team/", icon: "i-shield", title: "Southampton community safety", sub: "Southampton City Council" },
+      ]) +
+      `<p class="tiny" style="margin:14px 4px 0">Odyssey compares routes using public data. It doesn’t track you, contact anyone for you, or send help.</p>`,
       (body) => {
         body.querySelector("#h-999").addEventListener("click", () => {
           if (confirm("Call 999 now?")) window.location.href = "tel:999";
@@ -903,7 +1039,7 @@
             const ll = await getPosition();
             const url = `https://www.google.com/maps?q=${ll[0].toFixed(5)},${ll[1].toFixed(5)}`;
             if (navigator.share) { await navigator.share({ title: "My location", text: "This is where I am:", url }); msg.textContent = ""; }
-            else { await navigator.clipboard.writeText(url); msg.textContent = `Copied: ${url}`; }
+            else { await navigator.clipboard.writeText(url); msg.textContent = "Location link copied. Paste it into a message."; }
           } catch (e) { msg.textContent = e.message || "Couldn’t share your location."; }
         });
       });
@@ -953,24 +1089,40 @@
   function openAbout() {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-    openModal("About Odyssey",
-      `<p class="lead">Odyssey compares walking routes in Southampton after dark and shows the evidence behind every rating. Its routing engine is called Athena.</p>` +
-      `<div class="stack">` +
-      (!standalone && installEvent ? `<button class="btn primary block" id="a-install">Add Odyssey to your home screen</button>` : "") +
-      (!standalone && ios ? `<p class="notice" style="background:var(--raised);color:var(--text)">To install on iPhone: tap Share in Safari, then “Add to Home Screen”.</p>` : "") +
-      `<button class="btn secondary block" id="a-prefs"><svg><use href="#i-sliders"/></svg>Route preferences</button>` +
-      `<button class="btn secondary block" id="a-tonight">Data sources and how ratings work</button>` +
-      `<button class="btn quiet block" id="a-welcome">Show the introduction again</button></div>` +
-      `<h3 class="section">Privacy</h3><p class="small">No accounts and no tracking. Your location is used on your phone to plan the route you asked for. ` +
-      `Place searches go to OpenStreetMap’s search service. Reports and preferences stay on this phone.</p>` +
-      `<h3 class="section">Credits</h3><p class="small">Map data © OpenStreetMap contributors (ODbL). Crime data: Police UK (Open Government Licence v3). ` +
-      `Tide and flood data: Environment Agency (OGL v3). Map library: Leaflet. Pilot for adults 18+.</p>`,
+    const ev = model && model.evaluation;
+    openModal("Odyssey",
+      `<div class="about-hero"><svg class="about-logo"><use href="#logo"/></svg><div><p class="about-name">Odyssey</p>` +
+      `<p class="small">Night walking routes for Southampton</p></div></div>` +
+      (!standalone && (installEvent || ios) ? groupHTML([{ id: "a-install", icon: "i-download", title: "Add to Home Screen", sub: ios ? "In Safari: Share, then Add to Home Screen" : "Opens full-screen and works offline", tone: "accent" }]) : "") +
+      `<h3 class="section">Settings</h3>` +
+      groupHTML([
+        { id: "a-prefs", icon: "i-sliders", title: "Route preferences", sub: "Lighting, stairs, slopes, surface" },
+        { id: "a-welcome", icon: "i-replay", title: "Show the introduction", sub: "How to read the map" },
+      ]) +
+      `<h3 class="section">How it works</h3>` +
+      groupHTML([
+        { id: "a-tonight", icon: "i-info", title: "Data and ratings", sub: "How the crime model works, and its limits" },
+        { id: "a-privacy", icon: "i-lock", title: "Privacy", sub: "No accounts, no tracking" },
+      ]) +
+      `<p class="tiny" style="margin:16px 4px 0;line-height:1.6">Map data © OpenStreetMap contributors (ODbL). Crime data: Police UK (OGL v3). ` +
+      `Tide and flood data: Environment Agency (OGL v3). Map library: Leaflet.</p>`,
       (body) => {
         const ins = body.querySelector("#a-install");
-        if (ins) ins.addEventListener("click", async () => { installEvent.prompt(); await installEvent.userChoice; installEvent = null; closeModal(); });
+        if (ins) ins.addEventListener("click", async () => {
+          if (installEvent) { installEvent.prompt(); await installEvent.userChoice; installEvent = null; closeModal(); }
+          else toast("In Safari, tap Share, then Add to Home Screen.");
+        });
         body.querySelector("#a-prefs").addEventListener("click", openPrefs);
         body.querySelector("#a-tonight").addEventListener("click", openTonight);
         body.querySelector("#a-welcome").addEventListener("click", () => { closeModal(); startWelcome(); });
+        body.querySelector("#a-privacy").addEventListener("click", () => openModal("Privacy",
+          `<p class="lead">Odyssey is built to know as little about you as possible.</p>` +
+          groupHTML([
+            { id: "p1", icon: "i-lock", title: "No accounts", sub: "Nothing to sign up for" },
+            { id: "p2", icon: "i-locate", title: "Location stays on your phone", sub: "Used only to plan the route you asked for" },
+            { id: "p3", icon: "i-search", title: "Place search", sub: "Sent to OpenStreetMap’s search service" },
+            { id: "p4", icon: "i-flag", title: "Reports and preferences", sub: "Saved on this phone only" },
+          ]).replace(/<svg class="g-chev">.*?<\/svg>/g, "")));
       });
   }
   $("btn-menu").addEventListener("click", openAbout);
@@ -984,10 +1136,9 @@
       `<div class="w-point"><i class="sw low"></i><div><b>Lower risk</b><span>Fewer recorded problems nearby</span></div></div>` +
       `<div class="w-point"><i class="sw medium"></i><div><b>Medium risk</b></div></div>` +
       `<div class="w-point"><i class="sw high"></i><div><b>Higher risk</b><span>The top 10% of paths for predicted reported crime</span></div></div>` +
-      `<div class="w-point"><i class="sw unknown"></i><div><b>Unknown</b><span>No lighting record. We show it rather than guess: that’s ${unknownPct}% of paths.</span></div></div></div>`,
+      `<div class="w-point"><i class="sw unknown"></i><div><b>Unknown</b><span>No lighting record, or outside the area police crime data covers. We show it rather than guess: that’s ${unknownPct}% of paths.</span></div></div></div>`,
     () => `<h2 id="welcome-title">What it can and can’t do</h2>` +
-      `<p class="w-body">It compares routes using public data. It can’t promise any route is safe, it doesn’t track you, and it can’t call for help. In an emergency, call 999.</p>` +
-      `<label class="check-row"><input type="checkbox" id="w-adult"><span>I’m 18 or over. This pilot is for adults.</span></label>`,
+      `<p class="w-body">It compares routes using public data. It can’t promise any route is safe, it doesn’t track you, and it can’t call for help. In an emergency, call 999.</p>`,
     () => `<h2 id="welcome-title">Your route preferences</h2><p class="w-body" style="margin-bottom:6px">You can change these any time.</p>` + prefsFormHTML(loadPrefs()),
   ];
   let wStep = 0;
@@ -995,11 +1146,9 @@
     $("welcome-step").innerHTML = WELCOME[wStep]();
     $("welcome-dots").innerHTML = WELCOME.map((_, i) => `<i class="${i === wStep ? "on" : ""}"></i>`).join("");
     $("welcome-back").classList.toggle("hidden", wStep === 0);
+    $("welcome-skip").classList.toggle("hidden", wStep >= 2);
     const next = $("welcome-next");
     next.textContent = wStep === WELCOME.length - 1 ? "Start using Odyssey" : "Continue";
-    const adult = $("w-adult");
-    next.disabled = !!adult && !adult.checked;
-    if (adult) { adult.checked = store.get("odyssey_adult", false); next.disabled = !adult.checked; adult.addEventListener("change", () => { next.disabled = !adult.checked; store.set("odyssey_adult", adult.checked); }); }
   }
   function startWelcome() { wStep = 0; $("welcome").classList.remove("hidden"); renderWelcome(); }
   $("welcome-next").addEventListener("click", () => {
@@ -1013,6 +1162,8 @@
     renderWelcome();
   });
   $("welcome-back").addEventListener("click", () => { wStep = Math.max(0, wStep - 1); renderWelcome(); });
+  // Skip still shows the "what it can and can't do" screen, so everyone sees it once
+  $("welcome-skip").addEventListener("click", () => { wStep = Math.max(wStep, 2); renderWelcome(); });
 
   /* ---------------------------------------------------------------- start */
   if (/[?&]debug\b/.test(location.search)) window.__odyssey = { openSegment, openTonight, openHelp, openAbout, openPrefs, map, walkable };

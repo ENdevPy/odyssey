@@ -62,6 +62,7 @@ const DEFAULT_PREFS = {
   avoid_steep: false,      // penalise mapped steep inclines
   sheltered: false,        // prefer covered/sheltered segments
   terrain: "mixed",        // "paved" | "mixed" | "any"
+  avoid_waterside: false,  // set live by the app near high tide or during a local flood warning
 };
 function loadPrefs() {
   try {
@@ -78,6 +79,7 @@ function edgeMultiplier(seg, prefs) {
   if (prefs.sheltered && seg.covered === true) m *= 0.55;
   if (prefs.terrain === "paved" && seg.surface === "unpaved") m *= 2.5;
   if (prefs.terrain === "mixed" && seg.surface === "unpaved") m *= 1.3;
+  if (prefs.avoid_waterside && seg.tide_exposed === true) m *= 4.0;
   return m;                       // unknown values are never penalised
 }
 function explanationFactors(segments, prefs) {
@@ -279,7 +281,7 @@ function explain(route, altRoutes, crimes, havens, label) {
   // unknowns — the honesty case
   if (st.unknownCount > 0) {
     parts.push(`${st.unknownCount} segment${st.unknownCount > 1 ? "s" : ""} on this ` +
-      `route have no lighting data — risk unknown there.`);
+      `route have no lighting or crime data, so risk is unknown there.`);
   }
 
   // safe havens
