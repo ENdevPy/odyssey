@@ -1410,6 +1410,13 @@
   if (!store.get("odyssey_welcomed", false)) startWelcome();
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("sw.js").catch(() => { /* offline support is optional */ });
+    // check for a new version every time the app opens; when one takes over, reload once
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloaded && !walkState) { reloaded = true; location.reload(); }
+    });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+      .then((reg) => reg.update()).catch(() => { /* offline support is optional */ });
   }
 })();
