@@ -182,6 +182,7 @@ h2, h3, p { margin: 0; }
 #dest { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; font-size: 16.5px; height: 50px; -webkit-appearance: none; }
 #dest::placeholder { color: var(--faint); }
 #dest::-webkit-search-cancel-button { display: none; }
+#search-close.is-empty { visibility: hidden; }
 .icon-btn { width: var(--tap); height: var(--tap); display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--muted); flex: none; }
 .icon-btn:active { background: var(--raised-2); }
 .status { color: var(--muted); font-size: 13.5px; min-height: 0; margin-top: 10px; }
@@ -225,6 +226,8 @@ h2, h3, p { margin: 0; }
 .card-why li.good svg { color: var(--low); }
 .card-why li.bad svg { color: var(--high); }
 .card-why li.unk svg { color: var(--unknown); }
+.go-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+.go-note svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
 .dots { display: flex; justify-content: center; gap: 6px; margin: 8px 0 2px; }
 .dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--line); transition: width .2s, background .2s; }
 .dots i.on { width: 18px; background: var(--accent); }

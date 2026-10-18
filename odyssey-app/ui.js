@@ -367,6 +367,7 @@
     $("search-status").textContent = "";
     $("search-status").className = "status";
     renderSuggestions($("dest").value);
+    syncClear();
     if (focus) setTimeout(() => $("dest").focus(), 280);
   }
   function closeSearch() {
@@ -375,7 +376,19 @@
     setSheet(lastResults ? "half" : "peek");
   }
   $("open-search").addEventListener("click", () => openSearch());
-  $("search-close").addEventListener("click", closeSearch);
+  // the X clears what's typed in "To" (like a normal search box); it doesn't close the panel
+  function syncClear() { $("search-close").classList.toggle("is-empty", !$("dest").value); }
+  $("search-close").addEventListener("click", () => {
+    $("dest").value = "";
+    searchDone = "";
+    clearTimeout(searchTimer);
+    if (searchCtrl) searchCtrl.abort();
+    $("search-status").textContent = "";
+    $("search-status").className = "status";
+    renderSuggestions("");
+    syncClear();
+    $("dest").focus();
+  });
 
   let searchDone = "";   // the last query the online search fully answered
   function renderSuggestions(q, remote = []) {
@@ -399,6 +412,7 @@
     if (pickBtn) pickBtn.addEventListener("click", () => startPick("to"));
   }
   $("dest").addEventListener("input", () => {
+    syncClear();
     const q = $("dest").value.trim();
     renderSuggestions(q);
     clearTimeout(searchTimer);
@@ -503,6 +517,7 @@
     to = { name: place.name, ll: place.ll, sub: place.sub };
     if (!/Dropped pin/.test(place.name)) addRecent(to);
     $("dest").value = place.name;
+    syncClear();
     plan();
   }
 
@@ -590,12 +605,12 @@
   }
 
   /* Google Maps handoff with as few stops as possible.
-   * Every waypoint in a Google Maps link shows up as a "stop", so we add one
-   * only where this route goes a different way from the shortest route (that's
-   * where Google would otherwise take its own, shorter path). At most
-   * MAX_STOPS, each well away from the start, the end and each other.
-   * The shortest route itself needs no stops. Set MAX_STOPS to 0 for none. */
-  const MAX_STOPS = 2;
+   * Routes that differ from the shortest get up to MAX_STOPS points spread
+   * evenly along the walk, so Google follows this route instead of its own.
+   * The shortest route needs none. Set MAX_STOPS to 0 for none. */
+  const MAX_STOPS = 8;   // Google Maps allows up to 9 points in a link
+  // Google Maps links can't steer a route without stops, and it pins every stop.
+  // We keep the stops (so it follows this route) and tell people on the card.
   function gmapsLink(r, shortest) {
     const steps = r.route.steps;
     const ll = (c) => `${c[0].toFixed(5)},${c[1].toFixed(5)}`;
@@ -603,26 +618,22 @@
     const end = graph.nodes.get(steps[steps.length - 1].to).c;
     const q = new URLSearchParams({ api: 1, origin: ll(start), destination: ll(end), travelmode: "walking" });
     if (MAX_STOPS > 0 && shortest && shortest.route !== r.route) {
-      const onShortest = new Set(shortest.route.segments.map((x) => x.id));
-      const runs = [];
-      let cur = null;
-      for (const st of steps) {
-        if (!onShortest.has(st.seg)) {
-          if (!cur) { cur = { steps: [], m: 0 }; runs.push(cur); }
-          cur.steps.push(st); cur.m += st.len;
-        } else cur = null;
+      // evenly spaced points along the walk, like the earlier version: Google Maps
+      // shows them as small dots and follows this route instead of its own
+      const pts = r.coords;
+      const cum = [0];
+      for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + distM(pts[k - 1], pts[k]));
+      const total = cum[cum.length - 1];
+      const wps = [];
+      for (let k = 1; k <= MAX_STOPS; k++) {
+        const target = (total * k) / (MAX_STOPS + 1);
+        let i = 1;
+        while (i < cum.length - 1 && cum[i] < target) i++;
+        const c = pts[i];
+        if (distM(c, start) > 100 && distM(c, end) > 100 && wps.every((w) => distM(w, c) > 120)) wps.push(c);
       }
-      const picks = [];
-      for (const run of runs.filter((x) => x.m >= 80).sort((a, b) => b.m - a.m)) {
-        if (picks.length >= MAX_STOPS) break;
-        // the point halfway along this different stretch
-        let acc = 0, mid = run.steps[0];
-        for (const st of run.steps) { acc += st.len; if (acc >= run.m / 2) { mid = st; break; } }
-        const c = graph.nodes.get(mid.to).c;
-        const farEnough = distM(c, start) > 150 && distM(c, end) > 150 && picks.every((p) => distM(p.c, c) > 250);
-        if (farEnough) picks.push({ c, at: steps.indexOf(mid) });
-      }
-      if (picks.length) q.set("waypoints", picks.sort((a, b) => a.at - b.at).map((p) => ll(p.c)).join("|"));
+      if (wps.length) q.set("waypoints", wps.map(ll).join("|"));
+      r.gmapsStops = wps.length;
     }
     return "https://www.google.com/maps/dir/?" + q.toString();
   }
@@ -713,7 +724,9 @@
         `<a class="btn primary" href="${r.gmaps}" target="_blank" rel="noopener" data-go="${i}"><svg><use href="#i-walk"/></svg>Go</a>` +
         `<button class="btn secondary square" data-share="${i}" aria-label="Share this walk"><svg><use href="#i-share"/></svg></button>` +
         `<button class="btn secondary square" data-report="${i}" aria-label="Report a problem on this route"><svg><use href="#i-flag"/></svg></button>` +
-        `</div></article>`;
+        `</div>` +
+        (r.gmapsStops ? `<p class="go-note"><svg><use href="#i-dot"/></svg><span>Google Maps shows small dots along the way. They keep it on this route.</span></p>` : "") +
+        `</article>`;
     }).join("");
     $("card-dots").innerHTML = uniq.length > 1 ? uniq.map((_, i) => `<i class="${i === 0 ? "on" : ""}"></i>`).join("") : "";
     cards.scrollLeft = 0;
