@@ -659,7 +659,7 @@ def train_model(segs, per_month, havens, months, offline):
     print("    comparison-fit coefficients for removed features:", removed_coefs)
 
     # evaluate on the held-out month
-    pairs_m, pairs_b = [], []
+    pairs_m, pairs_b, pairs_r, silent_m, silent_l = [], [], [], [], []
     for s in scored:
         mi = months_sorted.index(test_m)
         if mi < 2:
@@ -671,7 +671,13 @@ def train_model(segs, per_month, havens, months, offline):
         y = 1 if count(s, test_m) > 0 else 0
         pairs_m.append((logistic(z), y))
         pairs_b.append((lag1, y))             # baseline: last month's count
+        # stronger baseline: last two months' count, ties broken by length
+        pairs_r.append((lag1 + lag2 + s["length_m"] / 1e6, y))
+        if lag1 + lag2 == 0:                  # history is silent here
+            silent_m.append((logistic(z), y))
+            silent_l.append((s["length_m"], y))
     auc_m, auc_b = auc(pairs_m), auc(pairs_b)
+    auc_r, auc_sm, auc_sl = auc(pairs_r), auc(silent_m), auc(silent_l)
     base_rate = sum(yy for _, yy in pairs_m) / len(pairs_m)
 
     # predict next month for every scored segment (lags = last two months)
@@ -715,6 +721,16 @@ def train_model(segs, per_month, havens, months, offline):
             "baseline_description":
                 "predicts risk from last month's crime count alone",
             "base_rate_any_crime_next_month": round(base_rate, 4),
+            "auc_baseline_two_month_rule": round(auc_r, 3) if auc_r else None,
+            "two_month_rule_description":
+                "last two months' crime count, ties broken by path length",
+            "share_scored_with_no_recent_crime": round(len(silent_m) / max(1, len(pairs_m)), 3),
+            "auc_model_no_recent_crime": round(auc_sm, 3) if auc_sm else None,
+            "auc_length_only_no_recent_crime": round(auc_sl, 3) if auc_sl else None,
+            "honest_reading":
+                "Recent crime explains most of the ranking. The model adds most "
+                "where a path had no crime in the last two months, where crime "
+                "history alone cannot rank paths.",
         },
         "bands": {
             "high": f"top 10% of scored segments by predicted risk "

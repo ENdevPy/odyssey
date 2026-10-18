@@ -25,6 +25,7 @@ class UserPrefs:
     avoid_steep: bool = False      # penalise mapped steep inclines
     sheltered: bool = False        # prefer covered/sheltered segments
     terrain: str = "mixed"         # "paved" | "mixed" | "any"
+    avoid_waterside: bool = False  # set live near high tide / local flood warning
 
     @staticmethod
     def load(raw=None):
@@ -48,6 +49,7 @@ PREFS_MULTS = {
     "shelter_bonus": 0.55,  # sheltered && covered is True (bonus)
     "paved_unpaved": 2.5,   # terrain == "paved" && surface == "unpaved"
     "mixed_unpaved": 1.3,   # terrain == "mixed" && surface == "unpaved"
+    "waterside": 4.0,       # avoid_waterside && tide_exposed is True
 }
 
 
@@ -67,6 +69,8 @@ def edge_multiplier(edge_data: dict, prefs: UserPrefs) -> float:
         m *= PREFS_MULTS["paved_unpaved"]
     elif prefs.terrain == "mixed" and edge_data.get("surface") == "unpaved":
         m *= PREFS_MULTS["mixed_unpaved"]
+    if prefs.avoid_waterside and edge_data.get("tide_exposed") is True:
+        m *= PREFS_MULTS["waterside"]
     return m
 
 
