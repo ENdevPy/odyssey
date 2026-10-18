@@ -1,156 +1,73 @@
 [
   {
     "id": "SH-01",
-    "name": "University of Southampton Security Lodge (Highfield gate)",
+    "name": "University Campus Security (Building 32, University Road)",
     "lat": 50.9362,
     "lng": -1.3957,
-    "hours": "24/7",
+    "hours": "24/7 security team, call 023 8059 3311",
     "type": "Security",
     "phone": "+44 23 8059 3311",
-    "segment_id": "SEG-1174345838",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "segment_id": "SEG-1174345837",
+    "source": "Checked 18 Oct 2026: southampton.ac.uk/estates/services/security (24-hour point of contact); position on University Road is approximate"
   },
   {
     "id": "SH-02",
-    "name": "Sainsbury's Portswood",
-    "lat": 50.9285,
-    "lng": -1.3995,
-    "hours": "07:00-23:00 (24h Fri/Sat)",
-    "type": "Retail",
-    "segment_id": "SEG-328364111",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "name": "Southampton General Hospital Emergency Department",
+    "lat": 50.93301,
+    "lng": -1.4351,
+    "hours": "24/7",
+    "type": "Hospital",
+    "segment_id": "SEG-1190182979",
+    "source": "Checked 18 Oct 2026: uhs.nhs.uk, Tremona Road SO16 6YD; position from postcode"
   },
   {
     "id": "SH-03",
-    "name": "Southampton Students' Union (The Bridge)",
-    "lat": 50.9345,
-    "lng": -1.3962,
-    "hours": "08:00-02:00",
-    "type": "Students' Union",
-    "segment_id": "SEG-231551357",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "name": "Glen Eyre Halls reception",
+    "lat": 50.943658,
+    "lng": -1.401025,
+    "hours": "For Glen Eyre residents; hours vary",
+    "type": "Halls reception",
+    "segment_id": "SEG-331277401",
+    "source": "Checked 18 Oct 2026: data.southampton.ac.uk point of service GLEN"
   },
   {
     "id": "SH-04",
-    "name": "Glen Eyre Halls reception",
-    "lat": 50.934,
-    "lng": -1.4026,
-    "hours": "24/7",
-    "type": "Halls reception",
-    "segment_id": "SEG-33883073",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "name": "Leonardo Royal Hotel Southampton Grand Harbour",
+    "lat": 50.89981,
+    "lng": -1.407725,
+    "hours": "24/7 front desk",
+    "type": "Hotel",
+    "segment_id": "SEG-305084380",
+    "source": "Checked 18 Oct 2026: hotel listing, West Quay Road SO15 1AG; position from postcode"
   },
   {
     "id": "SH-05",
-    "name": "Premier Inn Southampton City Centre",
-    "lat": 50.903,
-    "lng": -1.4045,
-    "hours": "24/7",
-    "type": "Hotel",
-    "segment_id": "SEG-1150195565",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "name": "Sainsbury's Portswood",
+    "lat": 50.926745,
+    "lng": -1.390877,
+    "hours": "Mon-Sat 07:00-22:00, Sun 11:00-17:00",
+    "type": "Retail",
+    "segment_id": "SEG-33740675",
+    "source": "Checked 18 Oct 2026: givefood.org.uk listing, 224 Portswood Road SO17 2LB; position from postcode"
   },
   {
     "id": "SH-06",
-    "name": "Southampton Central police front desk",
-    "lat": 50.9085,
-    "lng": -1.4115,
-    "hours": "08:00-20:00",
-    "type": "Police",
-    "phone": "101",
-    "segment_id": "SEG-1331965757",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "name": "Harbour Lights Picturehouse, Ocean Village",
+    "lat": 50.894681,
+    "lng": -1.393244,
+    "hours": "Opens 30 min before the first film, until the last film ends",
+    "type": "Cinema",
+    "segment_id": "SEG-154076501",
+    "source": "Checked 18 Oct 2026: picturehouses.com, Ocean Village SO14 3TL; position from postcode"
   },
   {
     "id": "SH-07",
-    "name": "Grand Harbour Hotel (Town Quay)",
-    "lat": 50.8995,
-    "lng": -1.402,
-    "hours": "24/7",
-    "type": "Hotel",
-    "segment_id": "SEG-1147230781",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-08",
-    "name": "Harbour Lights Picturehouse, Ocean Village",
-    "lat": 50.9045,
-    "lng": -1.394,
-    "hours": "10:00-00:30",
-    "type": "Cinema",
-    "segment_id": "SEG-185305699",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-09",
-    "name": "Asda Southampton (Ocean Village)",
-    "lat": 50.906,
-    "lng": -1.3935,
-    "hours": "24/7",
-    "type": "Retail",
-    "segment_id": "SEG-190394407",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-10",
-    "name": "Southampton General Hospital main reception",
-    "lat": 50.9174,
-    "lng": -1.4327,
-    "hours": "24/7",
-    "type": "Hospital",
-    "phone": "111",
-    "segment_id": "SEG-4077042",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-11",
-    "name": "Royal South Hants Hospital reception",
-    "lat": 50.9074,
-    "lng": -1.4051,
-    "hours": "24/7",
-    "type": "Hospital",
-    "phone": "111",
-    "segment_id": "SEG-4797573",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-12",
-    "name": "Tesco Express Bevois Valley",
-    "lat": 50.9207,
-    "lng": -1.404,
-    "hours": "06:00-23:00",
-    "type": "Retail",
-    "segment_id": "SEG-1134016762",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-13",
-    "name": "BP petrol station, Burgess Road",
-    "lat": 50.9308,
-    "lng": -1.3956,
-    "hours": "24/7",
-    "type": "Petrol station",
-    "segment_id": "SEG-173804804",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-14",
     "name": "Bitterne Leisure Centre",
-    "lat": 50.9215,
-    "lng": -1.3635,
-    "hours": "06:30-22:00",
+    "lat": 50.916862,
+    "lng": -1.355712,
+    "hours": "Daytime and evening; check times before you go",
     "type": "Leisure centre",
-    "segment_id": "SEG-757437813",
-    "source": "curated (hours hand-checked Oct 2026)"
-  },
-  {
-    "id": "SH-15",
-    "name": "Woodmill Inn",
-    "lat": 50.9257,
-    "lng": -1.38,
-    "hours": "11:00-23:00",
-    "type": "Pub",
-    "segment_id": "SEG-1123468873",
-    "source": "curated (hours hand-checked Oct 2026)"
+    "segment_id": "SEG-762168351",
+    "source": "Checked 18 Oct 2026: bhliveactive.org.uk, Dean Road SO18 6AQ; position from postcode"
   }
 ]
