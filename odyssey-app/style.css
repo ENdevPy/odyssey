@@ -217,7 +217,9 @@ h2, h3, p { margin: 0; }
 .ribbon .r-low { background: var(--low); } .ribbon .r-medium { background: var(--medium); } .ribbon .r-high { background: var(--high); }
 .ribbon .r-unknown { background: repeating-linear-gradient(90deg, var(--unknown) 0 5px, var(--raised) 5px 9px); }
 .ribbon-ends { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); margin-top: 4px; }
-.card-why { color: var(--text); font-size: 14px; margin-top: 10px; }
+.card-why { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.card-why li { position: relative; padding-left: 16px; font-size: 14.5px; font-weight: 650; line-height: 1.35; color: var(--text); }
+.card-why li::before { content: ""; position: absolute; left: 2px; top: .52em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .dots { display: flex; justify-content: center; gap: 6px; margin: 8px 0 2px; }
 .dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--line); transition: width .2s, background .2s; }
 .dots i.on { width: 18px; background: var(--accent); }

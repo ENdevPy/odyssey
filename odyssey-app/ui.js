@@ -524,6 +524,7 @@
     }
     const shortestR = uniq.find((x) => x.label === "Shortest") || (triad.shortest ? { route: triad.shortest } : null);
     for (const r of uniq) r.gmaps = gmapsLink(r, shortestR);
+    for (const r of uniq) r.bullets = bulletsFor(r, uniq);
     lastResults = { uniq, fromLL, toLL: to.ll, fromName: from.name, toName: to.name };
     renderResults();
     vibrate(12);
@@ -567,6 +568,30 @@
     return "https://www.google.com/maps/dir/?" + q.toString();
   }
 
+  /* Short, scannable facts for each route card (max 4), built from the same
+   * data the core's explain() uses. The full sentence stays available to
+   * screen readers through the card's label. */
+  function bulletsFor(r, uniq) {
+    const out = [];
+    const shortest = uniq.find((x) => x.label === "Shortest");
+    const segIds = new Set(r.route.segments.map((x) => x.id));
+    if (r.label === "Shortest" || !shortest) out.push("Most direct route");
+    else {
+      const d = Math.round(r.stats.minutes - shortest.stats.minutes);
+      out.push(d >= 1 ? `+${d} min vs shortest` : "Same time as shortest");
+      const avoided = shortest.route.segments.find((x) => !segIds.has(x.id) && (x.risk_band === "high" || x.risk_band === "unknown"));
+      if (avoided) out.push(avoided.lighting === "no" ? "Avoids an unlit path" : avoided.risk_band === "unknown" ? "Avoids a path with no lighting data" : "Avoids a higher-risk path");
+    }
+    if (r.note) out.push("Best option within a 12 min detour");
+    const crimes = r.route.segments.reduce((t, x) => t + (x.crime_count_90d || 0), 0);
+    out.push(crimes ? `${crimes} street crime${crimes > 1 ? "s" : ""} nearby (3 months)` : "No recent street crime recorded");
+    if (r.stats.unknownCount) out.push(`${r.stats.unknownCount} stretch${r.stats.unknownCount > 1 ? "es" : ""} with no lighting data`);
+    const haven = havens.find((h) => /24\/7/.test(h.hours) && r.coords.some((c) => distM(c, [h.lat, h.lng]) < 150));
+    if (haven) out.push("Passes a 24/7 staffed place");
+    if (r.route.segments.some((x) => x.tide_exposed)) out.push("Includes a waterside path");
+    return out.slice(0, 4);
+  }
+
   function legsOf(route) {
     const legs = [];
     for (const st of route.steps) {
@@ -603,11 +628,11 @@
     const cards = $("cards");
     cards.innerHTML = uniq.map((r, i) => {
       const st = r.stats;
-      return `<article class="card" role="listitem" data-i="${i}" tabindex="0" aria-label="${LABELS[r.label]} route, ${Math.round(st.minutes)} minutes, ${BAND_TEXT[st.band]}">` +
+      return `<article class="card" role="listitem" data-i="${i}" tabindex="0" aria-label="${LABELS[r.label]} route, ${Math.round(st.minutes)} minutes, ${BAND_TEXT[st.band]}. ${esc(r.text)}">` +
         `<div class="card-top"><span class="card-label">${LABELS[r.label]}</span><span class="band ${st.band}">${BAND_TEXT[st.band]}</span></div>` +
         `<div class="eta"><b>${etaTime(st.minutes)}</b><span>arrive · ${Math.round(st.minutes)} min · ${(st.len / 1000).toFixed(1)} km</span></div>` +
         ribbonHTML(r.legs) +
-        `<p class="card-why">${esc(r.text)}</p>` +
+        `<ul class="card-why">${r.bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` +
         `<div class="actions">` +
         `<a class="btn primary" href="${r.gmaps}" target="_blank" rel="noopener" data-go="${i}"><svg><use href="#i-walk"/></svg>Go</a>` +
         `<button class="btn secondary square" data-share="${i}" aria-label="Share this walk"><svg><use href="#i-share"/></svg></button>` +
