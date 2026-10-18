@@ -143,9 +143,11 @@
     }).on("click", (e) => {
       L.DomEvent.stopPropagation(e);
       if (pick) return;
-      openSegment(s);
+      openRoadPeek(s, e.latlng);
     }).addTo(map);
   }
+  // midpoints for quick "what's around here" lookups
+  const segMids = segments.map((x) => [x, x.coordinates[Math.floor(x.coordinates.length / 2)]]);
   for (const h of havens) {
     L.circleMarker([h.lat, h.lng], {
       pane: "pins", radius: 6, color: "#0E1726", weight: 2, fillColor: "#7DD3FC", fillOpacity: 1,
@@ -526,6 +528,12 @@
 
   // throw away the previous route as soon as a new plan starts, so a failed
   // search never leaves an old route on the map or in the sheet
+  // metres actually walked on paths matching test (counts only the part of each path the route uses)
+  function walkedM(r, test) {
+    let m = 0;
+    for (const st of r.route.steps) { const seg = graph.byId.get(st.seg); if (seg && test(seg)) m += st.len; }
+    return m;
+  }
   function clearResults() {
     lastResults = null;
     drawRoutes();
@@ -593,8 +601,7 @@
       r.factors = explanationFactors(r.route.segments, prefs);
       r.coords = [graph.nodes.get(r.route.steps[0].from).c].concat(r.route.steps.map((st) => graph.nodes.get(st.to).c));
       r.legs = legsOf(r.route);
-      const tot = lenOf(r.route.segments) || 1;
-      r.crimeCover = lenOf(r.route.segments.filter((x) => x.crime_covered)) / tot;
+      r.crimeCover = walkedM(r, (x) => x.crime_covered) / (walkedM(r, () => true) || 1);
     }
     const shortestR = uniq.find((x) => x.label === "Shortest") || (triad.shortest ? { route: triad.shortest } : null);
     for (const r of uniq) r.gmaps = gmapsLink(r, shortestR);
@@ -707,6 +714,207 @@
       `</div><div class="ribbon-ends"><span>Start</span><span>Destination</span></div>`;
   }
 
+  /* ---------- Google Maps stops: say clearly they aren't the destination */
+  function explainStops(r) {
+    openModal("Before you open Google Maps",
+      `<div class="explain">` +
+      `<div class="ex-row"><span class="ex-ico dot"></span><div><b>${r.gmapsStops} small stops along the way</b><span>They keep Google Maps on the ${LABELS[r.label].toLowerCase()} route. They aren’t your destination.</span></div></div>` +
+      `<div class="ex-row"><span class="ex-ico"><svg><use href="#i-pin"/></svg></span><div><b>The red pin moves as you walk</b><span>After you press Start, it sits on the next stop, then jumps ahead each time you pass one.</span></div></div>` +
+      `<div class="ex-row"><span class="ex-ico end"><svg><use href="#i-flag"/></svg></span><div><b>${esc(lastResults.toName)} is the last stop</b><span>That’s where the route ends.</span></div></div>` +
+      `</div>` +
+      `<label class="check-row" style="margin-top:16px"><input type="checkbox" id="ex-hide"><span>Don’t show this again</span></label>` +
+      `<div class="stack" style="margin-top:16px">` +
+      `<a class="btn primary block" id="ex-go" href="${r.gmaps}" target="_blank" rel="noopener">Open Google Maps</a>` +
+      `<button class="btn secondary block" id="ex-walk"><svg><use href="#i-locate"/></svg>Walk with Odyssey instead</button></div>`,
+      (body) => {
+        const remember = () => { if (body.querySelector("#ex-hide").checked) store.set("odyssey_stops_ok", true); };
+        body.querySelector("#ex-go").addEventListener("click", () => { remember(); setTimeout(closeModal, 300); });
+        body.querySelector("#ex-walk").addEventListener("click", () => { remember(); closeModal(); startWalk(r); });
+      });
+  }
+
+  /* ---------- ride suggestion (settings: odyssey_ride) */
+  const RIDE_DEFAULT = { mode: "long", minutes: 20 };
+  const rideSettings = () => ({ ...RIDE_DEFAULT, ...store.get("odyssey_ride", {}) });
+  function rideReason() {
+    const set = rideSettings();
+    if (set.mode === "off" || !lastResults) return null;
+    const best = lastResults.uniq[0];           // the lower-risk route
+    const min = Math.round(best.stats.minutes);
+    const long = min > set.minutes;
+    const risky = best.stats.band === "high";
+    if ((set.mode === "long" || set.mode === "long_or_risky") && long)
+      return { title: "Long walk", text: `${min} min on foot${risky ? ", with a higher-risk stretch even on the lower-risk route" : ""}. Prefer a ride?` };
+    if ((set.mode === "risky" || set.mode === "long_or_risky") && risky)
+      return { title: "Higher-risk stretch on every route", text: "Even the lower-risk route passes a higher-risk path. Prefer a ride?" };
+    return null;
+  }
+  function renderRide() {
+    const why = rideReason();
+    const box = $("ride-card");
+    if (!why) { box.innerHTML = ""; return; }
+    const d = lastResults.toLL, name = lastResults.toName;
+    const uber = "https://m.uber.com/ul/?" + new URLSearchParams({
+      action: "setPickup", pickup: "my_location",
+      "dropoff[latitude]": d[0].toFixed(6), "dropoff[longitude]": d[1].toFixed(6), "dropoff[nickname]": name,
+    }).toString();
+    box.innerHTML =
+      `<div class="ride"><div class="ride-head"><span class="ride-ico"><svg><use href="#i-moon"/></svg></span>` +
+      `<div><p class="ride-title">${esc(why.title)}</p><p class="ride-text">${esc(why.text)}</p></div></div>` +
+      `<div class="ride-actions">` +
+      `<a class="btn ride-uber" href="${uber}" target="_blank" rel="noopener">Uber</a>` +
+      `<button class="btn ride-bolt" id="ride-bolt">Bolt</button>` +
+      `<button class="btn secondary" id="ride-share"><svg><use href="#i-share"/></svg>Send location</button></div>` +
+      `<button class="ride-settings" id="ride-settings">Ride suggestions: ${rideSettings().mode === "off" ? "off" : "change"}</button></div>`;
+    $("ride-bolt").addEventListener("click", async () => {
+      // Bolt has no public link that fills in the destination, so copy it first
+      try { await navigator.clipboard.writeText(`${name}${lastResults.toSub ? ", " + lastResults.toSub : ""}, Southampton`); } catch (e) { /* ignore */ }
+      toast("Destination copied. Paste it into Bolt.");
+      setTimeout(() => window.open("https://bolt.eu/en-gb/rides/", "_blank", "noopener"), 700);
+    });
+    $("ride-share").addEventListener("click", () => shareMyLocation());
+    $("ride-settings").addEventListener("click", openPrefs);
+  }
+
+  /* ---------- share where I am right now */
+  async function shareMyLocation(msgEl) {
+    const say = (t) => { if (msgEl) msgEl.textContent = t; else if (t) toast(t); };
+    say("Finding your location…");
+    try {
+      const ll = walkState && walkState.last ? walkState.last : await getPosition();
+      const url = `https://www.google.com/maps?q=${ll[0].toFixed(5)},${ll[1].toFixed(5)}`;
+      const dest = lastResults ? ` I’m heading to ${lastResults.toName}.` : "";
+      if (navigator.share) { await navigator.share({ title: "My location", text: `This is where I am right now.${dest}`, url }); say(""); }
+      else { await navigator.clipboard.writeText(`This is where I am right now.${dest} ${url}`); say("Location link copied. Paste it into a message."); }
+    } catch (e) { if (e && e.name !== "AbortError") say(e.message || "Couldn’t share your location."); else say(""); }
+  }
+
+  /* ---------- tap a road: short summary of the area around it */
+  let peekPopup = null;
+  function openRoadPeek(s, latlng) {
+    const at = [latlng.lat, latlng.lng];
+    const near = segMids.filter(([, m]) => distM(m, at) <= 150).map(([x]) => x);
+    const covered = near.some((x) => x.crime_covered);
+    const crimes = near.reduce((t, x) => t + (x.crime_count_90d || 0), 0);
+    const lenNear = lenOf(near) || 1;
+    const litPct = Math.round((lenOf(near.filter((x) => x.lighting === "yes")) / lenNear) * 100);
+    const noLight = near.every((x) => x.lighting === "unknown");
+    let haven = null, hd = Infinity;
+    for (const h of havens) { const d = distM(at, [h.lat, h.lng]); if (d < hd) { hd = d; haven = h; } }
+    const name = s.name === "unnamed path" ? `Unnamed ${s.highway_type}` : s.name;
+    const light = s.lighting === "yes" ? "This path is lit" : s.lighting === "no" ? "This path is unlit" : "No lighting record for this path";
+    const rows = [
+      ["i-bulb", light + (noLight ? "" : ` · ${litPct}% of paths nearby are lit`)],
+      covered ? ["i-alert", crimes ? `${crimes} street crime${crimes > 1 ? "s" : ""} reported within 150 m (3 months)` : "No street crime reported within 150 m (3 months)"]
+        : ["i-alert", "No police crime data for this area"],
+      haven && hd <= 1000 ? ["i-shield", `${esc(haven.name)}, ${Math.round(hd / 10) * 10} m away`] : ["i-shield", "No staffed place within 1 km"],
+    ];
+    const html = `<div class="peek"><div class="peek-top"><b>${esc(name)}</b><span class="band ${s.risk_band}">${BAND_TEXT[s.risk_band]}</span></div>` +
+      `<ul>${rows.map(([ic, t]) => `<li><svg><use href="#${ic}"/></svg><span>${t}</span></li>`).join("")}</ul>` +
+      `<button class="peek-more">More details</button></div>`;
+    if (peekPopup) map.closePopup(peekPopup);
+    peekPopup = L.popup({ className: "peek-pop", closeButton: true, autoPanPaddingTopLeft: [12, 80], autoPanPaddingBottomRight: [12, 40], maxWidth: 290 })
+      .setLatLng(latlng).setContent(html).openOn(map);
+    const el = peekPopup.getElement();
+    el && el.querySelector(".peek-more").addEventListener("click", () => { map.closePopup(peekPopup); openSegment(s); });
+  }
+
+  /* ---------- Walk with Odyssey: live position on our own map */
+  let walkState = null;
+  async function startWalk(r) {
+    if (!navigator.geolocation) return toast("This browser can’t share your location.");
+    const pts = r.coords;
+    const cum = [0];
+    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + distM(pts[k - 1], pts[k]));
+    walkState = { r, pts, cum, total: cum[cum.length - 1], follow: true, last: null, idx: 0, done: false, lock: null };
+    selected = lastResults.uniq.indexOf(r);
+    document.body.classList.add("walking");
+    $("walkbar").classList.remove("hidden");
+    $("wb-sub").textContent = `${LABELS[r.label]} route to ${lastResults.toName}`;
+    $("wb-next").textContent = "Finding your location…";
+    $("wb-warn").classList.add("hidden");
+    drawRoutes();
+    map.setView(pts[0], 17, { animate: true });
+    updateWalk(null);
+    try { if (navigator.wakeLock) walkState.lock = await navigator.wakeLock.request("screen"); } catch (e) { /* not supported */ }
+    walkState.watch = navigator.geolocation.watchPosition(
+      (p) => onWalkPos([p.coords.latitude, p.coords.longitude]),
+      (err) => { toast(err.code === 1 ? "Location is off for this site, so Odyssey can’t follow your walk." : "Can’t get your location right now."); if (err.code === 1) endWalk(); },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
+    vibrate(12);
+  }
+  // nearest point on the route line to where you are
+  function project(ll) {
+    const { pts, cum } = walkState;
+    const kx = Math.cos((ll[0] * Math.PI) / 180);
+    let best = { d: Infinity, along: 0, i: 0 };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = pts[i][1] * kx, ay = pts[i][0], bx = pts[i + 1][1] * kx, by = pts[i + 1][0];
+      const px = ll[1] * kx, py = ll[0];
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      const t = L2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L2)) : 0;
+      const q = [ay + t * dy, (ax + t * dx) / kx];
+      const d = distM(ll, q);
+      if (d < best.d) best = { d, along: cum[i] + t * (cum[i + 1] - cum[i]), i };
+    }
+    return best;
+  }
+  function streetAt(i) {
+    const st = walkState.r.route.steps[i];
+    const seg = st && graph.byId.get(st.seg);
+    return seg && seg.name && seg.name !== "unnamed path" ? seg.name : null;
+  }
+  function onWalkPos(ll) {
+    if (!walkState) return;
+    walkState.last = ll;
+    showMe(ll);
+    if (walkState.follow) map.panTo(ll, { animate: true });
+    updateWalk(project(ll));
+  }
+  function updateWalk(pr) {
+    const w = walkState;
+    const left = pr ? Math.max(0, w.total - pr.along) : w.total;
+    const min = Math.max(0, Math.round(left / 80));
+    $("wb-min").textContent = min;
+    $("wb-dist").textContent = left >= 1000 ? `${(left / 1000).toFixed(1)} km` : `${Math.round(left / 10) * 10} m`;
+    $("wb-sub").textContent = `Arrive ${etaTime(left / 80)} · ${LABELS[w.r.label]} route to ${lastResults.toName}`;
+    if (!pr) return;
+    if (left < 30 && !w.done) {
+      w.done = true;
+      $("wb-next").innerHTML = `<b>You’ve arrived at ${esc(lastResults.toName)}</b>`;
+      $("wb-end").textContent = "Done";
+      vibrate([20, 60, 20]);
+      return;
+    }
+    const off = pr.d > 40;
+    $("wb-warn").classList.toggle("hidden", !off);
+    if (off) $("wb-warn-text").textContent = `You’re about ${Math.round(pr.d / 10) * 10} m off the route.`;
+    const here = streetAt(pr.i);
+    let next = null, nextAt = 0;
+    for (let k = pr.i + 1; k < w.r.route.steps.length; k++) {
+      const n = streetAt(k);
+      if (n && n !== here) { next = n; nextAt = w.cum[k] - pr.along; break; }
+    }
+    $("wb-next").innerHTML = (here ? `On <b>${esc(here)}</b>` : "Follow the line") +
+      (next ? ` · then <b>${esc(next)}</b> in ${nextAt >= 1000 ? (nextAt / 1000).toFixed(1) + " km" : Math.max(10, Math.round(nextAt / 10) * 10) + " m"}` : "");
+  }
+  function endWalk() {
+    if (!walkState) return;
+    if (walkState.watch != null) navigator.geolocation.clearWatch(walkState.watch);
+    try { walkState.lock && walkState.lock.release(); } catch (e) { /* ignore */ }
+    walkState = null;
+    document.body.classList.remove("walking");
+    $("walkbar").classList.add("hidden");
+    $("wb-end").textContent = "End";
+    drawRoutes();
+    setSheet("half");
+  }
+  $("wb-end").addEventListener("click", endWalk);
+  $("wb-recenter").addEventListener("click", () => { if (!walkState) return; walkState.follow = true; if (walkState.last) map.setView(walkState.last, 17); });
+  $("wb-share").addEventListener("click", () => shareMyLocation());
+  $("wb-replan").addEventListener("click", () => { endWalk(); from = { kind: "gps", name: "My location" }; plan(); });
+  map.on("dragstart", () => { if (walkState) walkState.follow = false; });
+
   function renderResults() {
     const { uniq, fromName, toName } = lastResults;
     $("results-to").textContent = toName;
@@ -725,7 +933,8 @@
         `<button class="btn secondary square" data-share="${i}" aria-label="Share this walk"><svg><use href="#i-share"/></svg></button>` +
         `<button class="btn secondary square" data-report="${i}" aria-label="Report a problem on this route"><svg><use href="#i-flag"/></svg></button>` +
         `</div>` +
-        (r.gmapsStops ? `<p class="go-note"><svg><use href="#i-dot"/></svg><span>Google Maps shows small dots along the way. They keep it on this route.</span></p>` : "") +
+        `<button class="btn secondary block walk-btn" data-walk="${i}"><svg><use href="#i-locate"/></svg>Walk with Odyssey</button>` +
+        (r.gmapsStops ? `<p class="go-note"><svg><use href="#i-dot"/></svg><span>Google Maps shows ${r.gmapsStops} small stops that keep it on this route. <b>They aren’t your destination.</b> ${esc(toName)} is the last stop.</span></p>` : "") +
         `</article>`;
     }).join("");
     $("card-dots").innerHTML = uniq.length > 1 ? uniq.map((_, i) => `<i class="${i === 0 ? "on" : ""}"></i>`).join("") : "";
@@ -737,7 +946,13 @@
     }));
     cards.querySelectorAll("[data-share]").forEach((b) => b.addEventListener("click", () => shareWalk(uniq[+b.dataset.share])));
     cards.querySelectorAll("[data-report]").forEach((b) => b.addEventListener("click", () => openReport({ route: uniq[+b.dataset.report] })));
-    cards.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", () => vibrate(10)));
+    cards.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", (e) => {
+      vibrate(10);
+      const rr = uniq[+a.dataset.go];
+      if (rr.gmapsStops && !store.get("odyssey_stops_ok", false)) { e.preventDefault(); explainStops(rr); }
+    }));
+    cards.querySelectorAll("[data-walk]").forEach((b) => b.addEventListener("click", () => startWalk(uniq[+b.dataset.walk])));
+    renderRide();
     showView("results");
     setSheet("half");
     selectRoute(0, false);
@@ -799,7 +1014,7 @@
     document.body.classList.add("pane-dim");
     const { uniq } = lastResults;
     uniq.forEach((r, i) => {
-      if (i === selected) return;
+      if (i === selected || walkState) return;
       const alt = L.polyline(r.coords, { renderer: routeRenderer, color: "#AEB9CF", weight: 5, opacity: 0.75, dashArray: "2 9", lineCap: "round" })
         .on("click", (e) => { L.DomEvent.stopPropagation(e); selectRoute(i, true); });
       routeLayers.push(alt.addTo(map));
@@ -818,7 +1033,7 @@
     }).addTo(map);
     pins = [pin(r.coords[0], "start", "Start"), pin(r.coords[r.coords.length - 1], "end", lastResults.toName)];
     // time tags on each route, like the big map apps; tap one to pick that route
-    uniq.forEach((x, i) => {
+    if (!walkState) uniq.forEach((x, i) => {
       const at = tagSpot(x, i, uniq);
       const tag = L.marker(at, {
         pane: "pins", keyboard: false, title: `${LABELS[x.label]} route`,
@@ -840,9 +1055,9 @@
   function renderDetail(r) {
     const segs = r.route.segments;
     const crimes = segs.reduce((t, s) => t + (s.crime_count_90d || 0), 0);
-    const unknownM = r.legs.filter((l) => l.band === "unknown").reduce((t, l) => t + l.m, 0);
-    const noLightM = lenOf(segs.filter((x) => x.lighting === "unknown"));
-    const noCrimeM = lenOf(segs.filter((x) => !x.crime_covered));
+    const unknownM = walkedM(r, (x) => x.risk_band === "unknown");
+    const noLightM = walkedM(r, (x) => x.lighting === "unknown");
+    const noCrimeM = walkedM(r, (x) => !x.crime_covered);
     const covPct = Math.round(r.crimeCover * 100);
     const highM = r.legs.filter((l) => l.band === "high").reduce((t, l) => t + l.m, 0);
     const passed = havens.filter((h) => r.coords.some((c) => distM(c, [h.lat, h.lng]) < 150));
@@ -1024,7 +1239,7 @@
 
   /* ---------------------------------------------------------------- help */
   function openHelp() {
-    openModal("Help",
+    openModal("SOS",
       `<button class="sos" id="h-999"><span class="sos-ring"><svg><use href="#i-phone"/></svg></span><span><b>Call 999</b><small>Emergency services</small></span></button>` +
       `<h3 class="section">Get help</h3>` +
       groupHTML([
@@ -1045,16 +1260,7 @@
         body.querySelector("#h-999").addEventListener("click", () => {
           if (confirm("Call 999 now?")) window.location.href = "tel:999";
         });
-        body.querySelector("#h-share").addEventListener("click", async () => {
-          const msg = body.querySelector("#h-msg");
-          msg.textContent = "Finding your location…";
-          try {
-            const ll = await getPosition();
-            const url = `https://www.google.com/maps?q=${ll[0].toFixed(5)},${ll[1].toFixed(5)}`;
-            if (navigator.share) { await navigator.share({ title: "My location", text: "This is where I am:", url }); msg.textContent = ""; }
-            else { await navigator.clipboard.writeText(url); msg.textContent = "Location link copied. Paste it into a message."; }
-          } catch (e) { msg.textContent = e.message || "Couldn’t share your location."; }
-        });
+        body.querySelector("#h-share").addEventListener("click", () => shareMyLocation(body.querySelector("#h-msg")));
       });
   }
   $("btn-help").addEventListener("click", openHelp);
@@ -1073,7 +1279,21 @@
       row("pref-sheltered", "Prefer sheltered paths", `${covTxt(cov.sheltered_known_pct)}. Unmapped cover isn’t penalised.`, p.sheltered) +
       `<div style="padding:14px 0 4px"><p class="row-title">Path surface</p><p class="row-sub">${covTxt(cov.surface_known_pct)}</p>` +
       `<div class="segmented" role="radiogroup" aria-label="Path surface">${[["paved", "Paved only"], ["mixed", "Mostly paved"], ["any", "Any"]].map(([v, l]) =>
-        `<label><input type="radio" name="terrain" value="${v}" ${p.terrain === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>`;
+        `<label><input type="radio" name="terrain" value="${v}" ${p.terrain === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>` +
+      rideFormHTML();
+  }
+  function rideFormHTML() {
+    const rs = rideSettings();
+    const opt = (name, list, cur) => `<div class="segmented" role="radiogroup">${list.map(([v, l]) =>
+      `<label><input type="radio" name="${name}" value="${v}" ${String(cur) === String(v) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+    return `<div style="padding:18px 0 4px"><p class="row-title">Suggest a ride</p><p class="row-sub">Shows Uber and Bolt under your routes.</p>` +
+      opt("ride-mode", [["long", "Long walks"], ["long_or_risky", "Long or risky"], ["risky", "Risky only"], ["off", "Never"]], rs.mode) +
+      `<p class="row-sub" style="margin-top:12px">A long walk is over</p>` +
+      opt("ride-min", [[15, "15 min"], [20, "20 min"], [30, "30 min"], [45, "45 min"]], rs.minutes) + `</div>`;
+  }
+  function saveRide(root) {
+    const m = root.querySelector("input[name=ride-mode]:checked"), n = root.querySelector("input[name=ride-min]:checked");
+    store.set("odyssey_ride", { mode: m ? m.value : RIDE_DEFAULT.mode, minutes: n ? +n.value : RIDE_DEFAULT.minutes });
   }
   function readPrefs(root) {
     return {
@@ -1085,11 +1305,12 @@
     };
   }
   function openPrefs() {
-    openModal("Route preferences",
+    openModal("Preferences",
       `<p class="lead">These change which route Athena picks. They never change the crime risk shown.</p>` + prefsFormHTML(loadPrefs()) +
       `<button class="btn primary block" id="prefs-save" style="margin-top:16px">Save preferences</button>`,
       (body) => body.querySelector("#prefs-save").addEventListener("click", () => {
         store.set("odyssey_prefs", readPrefs(body));
+        saveRide(body);
         closeModal();
         toast("Preferences saved.");
         if (lastResults) plan();
@@ -1109,7 +1330,7 @@
       (!standalone && (installEvent || ios) ? groupHTML([{ id: "a-install", icon: "i-download", title: "Add to Home Screen", sub: ios ? "In Safari: Share, then Add to Home Screen" : "Opens full-screen and works offline", tone: "accent" }]) : "") +
       `<h3 class="section">Settings</h3>` +
       groupHTML([
-        { id: "a-prefs", icon: "i-sliders", title: "Route preferences", sub: "Lighting, stairs, slopes, surface" },
+        { id: "a-prefs", icon: "i-sliders", title: "Preferences", sub: "Lighting, stairs, slopes, ride suggestions" },
         { id: "a-welcome", icon: "i-replay", title: "Show the introduction", sub: "How to read the map" },
       ]) +
       `<h3 class="section">How it works</h3>` +
@@ -1167,6 +1388,7 @@
   $("welcome-next").addEventListener("click", () => {
     if (wStep === WELCOME.length - 1) {
       store.set("odyssey_prefs", readPrefs($("welcome-step")));
+      saveRide($("welcome-step"));
       store.set("odyssey_welcomed", true);
       $("welcome").classList.add("hidden");
       return;
@@ -1179,7 +1401,7 @@
   $("welcome-skip").addEventListener("click", () => { wStep = Math.max(wStep, 2); renderWelcome(); });
 
   /* ---------------------------------------------------------------- start */
-  if (/[?&]debug\b/.test(location.search)) window.__odyssey = { openSegment, openTonight, openHelp, openAbout, openPrefs, map, walkable };
+  if (/[?&]debug\b/.test(location.search)) window.__odyssey = { openRoadPeek, rideReason, renderRide, get last() { return lastResults; }, openSegment, openTonight, openHelp, openAbout, openPrefs, map, walkable };
   renderPlanView();
   showView("plan");
   setSheet("peek", false);

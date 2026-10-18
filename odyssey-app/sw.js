@@ -1,9 +1,9 @@
 /* Odyssey offline support. The app shell and map data are cached so the app
    opens instantly and still works with no signal (live tide, flood warnings
    and place search need a connection and say so when offline). */
-const VERSION = "odyssey-v12";
+const VERSION = "odyssey-v13";
 const SHELL = [
-  "./", "index.html", "style.css?v=10", "app.js?v=10", "ui.js?v=10",
+  "./", "index.html", "style.css?v=11", "app.js?v=11", "ui.js?v=11",
   "vendor/leaflet.js", "vendor/leaflet.css", "manifest.webmanifest",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png",
 ];

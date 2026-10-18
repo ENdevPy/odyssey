@@ -15,7 +15,7 @@
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -64,7 +64,7 @@
   <button class="pill" id="btn-tonight" aria-label="Tonight: live tide, flood warnings and data dates">
     <span class="live-dot" id="live-dot"></span><span id="tonight-label">Tonight</span>
   </button>
-  <button class="round help" id="btn-help" aria-label="Help and emergency contacts"><svg><use href="#i-shield"/></svg><span>Help</span></button>
+  <button class="round sos-btn" id="btn-help" aria-label="SOS: emergency call and help"><span>SOS</span></button>
 </header>
 
 <div id="map-tools">
@@ -138,6 +138,7 @@
     </div>
     <div class="cards" id="cards" role="list"></div>
     <div class="dots" id="card-dots" aria-hidden="true"></div>
+    <div id="ride-card"></div>
     <div id="route-detail"></div>
   </div>
 </section>
@@ -166,10 +167,27 @@
   </div>
 </section>
 
+<!-- Walk with Odyssey: live guidance on our own map -->
+<section id="walkbar" class="hidden" aria-label="Walking with Odyssey">
+  <div class="wb-top">
+    <div class="wb-main">
+      <p class="wb-eta"><b id="wb-min">0</b><span>min</span><span class="wb-dist" id="wb-dist"></span></p>
+      <p class="wb-sub" id="wb-sub"></p>
+    </div>
+    <button class="btn wb-end" id="wb-end">End</button>
+  </div>
+  <p class="wb-next" id="wb-next">Finding your location…</p>
+  <div class="wb-warn hidden" id="wb-warn" role="alert"><span id="wb-warn-text"></span><button id="wb-replan">Replan</button></div>
+  <div class="wb-actions">
+    <button class="btn secondary" id="wb-share"><svg><use href="#i-share"/></svg>Share live spot</button>
+    <button class="btn secondary" id="wb-recenter"><svg><use href="#i-locate"/></svg>Recentre</button>
+  </div>
+</section>
+
 <div id="toast" role="status" aria-live="polite" class="hidden"><span id="toast-text"></span><button id="toast-action" class="hidden"></button></div>
 
 <script src="vendor/leaflet.js"></script>
-<script src="app.js?v=10"></script>
-<script src="ui.js?v=10"></script>
+<script src="app.js?v=11"></script>
+<script src="ui.js?v=11"></script>
 </body>
 </html>

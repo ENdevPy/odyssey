@@ -338,6 +338,76 @@ h2, h3, p { margin: 0; }
 #toast button { min-height: 40px; padding: 0 12px; color: var(--accent); font-weight: 700; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+
+/* ------------------------------------------------------------ SOS button */
+.round.sos-btn { width: auto; padding: 0 18px; background: var(--danger); border-color: #F87171; color: #fff; font-weight: 800; font-size: 15px; letter-spacing: 1px; box-shadow: 0 6px 18px rgba(239, 68, 68, .35); }
+.round.sos-btn:active { transform: scale(.96); }
+.round.sos-btn { margin-left: auto; }
+
+/* ------------------------------------------------------------ card extras */
+.walk-btn { margin-top: 8px; min-height: 44px; font-size: 15px; }
+.go-note b { color: var(--text); font-weight: 650; }
+
+/* Google stops explainer */
+.explain { display: grid; gap: 14px; }
+.ex-row { display: flex; gap: 14px; align-items: flex-start; }
+.ex-row b { display: block; font-size: 15.5px; }
+.ex-row span:not(.ex-ico) { color: var(--muted); font-size: 14px; line-height: 1.45; }
+.ex-ico { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #EA4335; color: #fff; }
+.ex-ico svg { width: 18px; height: 18px; }
+.ex-ico.dot { background: var(--raised); border: 1px solid var(--line); }
+.ex-ico.dot::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 3px solid #5F6368; }
+.ex-ico.end { background: var(--accent); color: var(--accent-ink); }
+
+/* ------------------------------------------------------------ ride card */
+.ride { margin: 12px 0 4px; padding: 14px; border-radius: var(--r-l); background: linear-gradient(160deg, #22305A, #1A2742); border: 1px solid #34467A; }
+.ride-head { display: flex; gap: 12px; align-items: flex-start; }
+.ride-ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: rgba(165,180,252,.16); color: var(--accent); flex: none; }
+.ride-ico svg { width: 18px; height: 18px; }
+.ride-title { font-weight: 750; font-size: 16px; }
+.ride-text { color: var(--muted); font-size: 14px; line-height: 1.4; margin-top: 2px; }
+.ride-actions { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 8px; margin-top: 12px; }
+.ride-actions .btn { min-height: 44px; padding: 0 10px; font-size: 14.5px; }
+.ride-uber { background: #000; color: #fff; border: 1px solid #3a3a3a; }
+.ride-bolt { background: #34D186; color: #06281A; }
+.ride-settings { margin-top: 10px; font-size: 12.5px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; min-height: 32px; }
+
+/* ------------------------------------------------------------ road summary popup */
+.peek-pop .leaflet-popup-content-wrapper { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+.peek-pop .leaflet-popup-tip { background: var(--surface); border: 1px solid var(--line); }
+.peek-pop .leaflet-popup-content { margin: 14px 14px 12px; font: inherit; width: 260px !important; }
+.peek-pop a.leaflet-popup-close-button { color: var(--muted); top: 6px; right: 6px; font-size: 20px; }
+.peek-top { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding-right: 18px; }
+.peek-top b { font-size: 15.5px; line-height: 1.25; }
+.peek ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 7px; }
+.peek li { display: flex; gap: 8px; font-size: 13.5px; line-height: 1.35; color: var(--text); }
+.peek li svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--accent); }
+.peek-more { margin-top: 10px; color: var(--accent); font-weight: 700; font-size: 14px; min-height: 36px; }
+
+/* ------------------------------------------------------------ Walk with Odyssey */
+#walkbar {
+  position: fixed; z-index: 800; left: 0; right: 0; bottom: 0; background: var(--surface);
+  border-radius: var(--r-l) var(--r-l) 0 0; box-shadow: 0 -8px 30px rgba(3, 8, 18, .5);
+  padding: 16px 16px calc(var(--safe-b) + 16px); animation: view-in .3s var(--ease);
+}
+.wb-top { display: flex; align-items: center; gap: 12px; }
+.wb-main { flex: 1; min-width: 0; }
+.wb-eta { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.wb-eta b { font-size: 34px; font-weight: 780; letter-spacing: -1px; line-height: 1; color: var(--low); }
+.wb-eta span { font-weight: 700; font-size: 17px; }
+.wb-eta .wb-dist { color: var(--muted); font-weight: 600; font-size: 15px; margin-left: 6px; }
+.wb-sub { color: var(--muted); font-size: 13.5px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-end { background: #3A1E28; color: #FCA5A5; min-height: 44px; padding: 0 18px; }
+.wb-next { margin-top: 12px; padding: 12px 14px; border-radius: var(--r-m); background: var(--raised); font-size: 15px; line-height: 1.4; }
+.wb-next b { font-weight: 750; }
+.wb-warn { margin-top: 10px; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: var(--r-m); background: var(--warn-bg); color: var(--warn-text); font-size: 14px; font-weight: 600; }
+.wb-warn span { flex: 1; }
+.wb-warn button { min-height: 38px; padding: 0 12px; border-radius: 10px; background: rgba(0,0,0,.25); color: var(--warn-text); font-weight: 700; }
+.wb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.wb-actions .btn { min-height: 44px; font-size: 14.5px; }
+body.walking #sheet, body.walking #map-tools, body.walking #legend, body.walking #btn-tonight, body.walking #btn-menu { display: none !important; }
+body.walking #toast { bottom: 250px; }
+
 /* ------------------------------------------------------------ larger screens */
 @media (min-width: 900px) {
   #sheet {
@@ -354,6 +424,8 @@ h2, h3, p { margin: 0; }
   .modal.show { transform: translate(-50%, -50%); opacity: 1; }
   .card { flex-basis: calc(100% - 40px); }
   #pick-banner { left: 432px; right: auto; width: 380px; }
+  #walkbar { left: 16px; right: auto; bottom: 16px; width: 400px; border-radius: var(--r-l); }
+  body.walking #topbar { left: 16px; }
 }
 /* ------------------------------------------------------------ polish */
 .view:not(.hidden) { animation: view-in .28s var(--ease); }
