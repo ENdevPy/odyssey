@@ -89,6 +89,39 @@
     s.crime_covered = CRIME_AREAS.some((p) => distM(mid, p) <= CRIME_RADIUS_M);
     if (!s.crime_covered && s.risk_band !== "unknown") { s.risk_band = "unknown"; s.risk_score = null; }
   }
+  /* Parks and woods: mark footpaths whose middle sits inside a park, wood,
+   * common or similar green area of at least half a hectare (OSM basemap).
+   * Roads through parks (e.g. The Avenue across the Common) aren't marked. */
+  const PATHY = new Set(["footway", "path", "cycleway", "steps", "bridleway", "track", "pedestrian"]);
+  const greens = [];
+  if (basemap && basemap.features) {
+    for (const f of basemap.features) {
+      if (f.properties.kind !== "green" || f.geometry.type !== "Polygon") continue;
+      const ring = f.geometry.coordinates[0];
+      if (ring.length < 4) continue;
+      const kx = 111320 * Math.cos((ring[0][1] * Math.PI) / 180), ky = 110540;
+      let a = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let i = 0; i < ring.length; i++) {
+        const [x, y] = ring[i], [xn, yn] = ring[(i + 1) % ring.length];
+        a += x * kx * yn * ky - xn * kx * y * ky;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      if (Math.abs(a) / 2 >= 5000) greens.push({ ring, x0, x1, y0, y1 });
+    }
+  }
+  const inRing = (lng, lat, ring) => {
+    let c = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  for (const s of segments) {
+    if (!PATHY.has(s.highway_type)) continue;
+    const [lat, lng] = s.coordinates[Math.floor(s.coordinates.length / 2)];
+    s.in_green = greens.some((g) => lng >= g.x0 && lng <= g.x1 && lat >= g.y0 && lat <= g.y1 && inRing(lng, lat, g.ring));
+  }
   const graph = buildGraph(segments);
   const walkable = segments.filter((s) => s.highway_type !== "service" && s.length_m >= 10);
   const counts = { low: 0, medium: 0, high: 0, unknown: 0 };
@@ -666,6 +699,10 @@
       : ["i-check", "No recent street crime recorded", "good"]);
     else if (cov < 0.05) out.push(["i-alert", "No police crime data for this walk", "unk"]);
     else out.push(["i-alert", `${crimes || "No"} crime${crimes === 1 ? "" : "s"} recorded, but data covers only ${Math.round(cov * 100)}% of the walk`, "unk"]);
+    const greenM = walkedM(r, (x) => x.in_green === true);
+    if (greenM >= 50) out.push(["i-tree", `${Math.round(greenM / 10) * 10} m through a park or wood`, (loadPrefs().green || "reduce") === "any" ? "" : "unk"]);
+    else if ((loadPrefs().green || "reduce") !== "any" && uniq.some((u) => u !== r && walkedM(u, (x) => x.in_green === true) >= 50))
+      out.push(["i-tree", "Keeps out of parks and woods", "good"]);
     const noLight = r.route.segments.filter((x) => x.lighting === "unknown").length;
     if (noLight) out.push(["i-bulb", `${noLight} stretch${noLight > 1 ? "es" : ""} with no lighting data`, "unk"]);
     const haven = havens.find((h) => /24\/7/.test(h.hours) && r.coords.some((c) => distM(c, [h.lat, h.lng]) < 150));
@@ -804,13 +841,14 @@
     const name = s.name === "unnamed path" ? `Unnamed ${s.highway_type}` : s.name;
     const light = s.lighting === "yes" ? "This path is lit" : s.lighting === "no" ? "This path is unlit" : "No lighting record for this path";
     const rows = [
+      s.in_green ? ["i-tree", "Footpath through a park or wood"] : null,
       ["i-bulb", light + (noLight ? "" : ` · ${litPct}% of paths nearby are lit`)],
       covered ? ["i-alert", crimes ? `${crimes} street crime${crimes > 1 ? "s" : ""} reported within 150 m (3 months)` : "No street crime reported within 150 m (3 months)"]
         : ["i-alert", "No police crime data for this area"],
       haven && hd <= 1000 ? ["i-shield", `${esc(haven.name)}, ${Math.round(hd / 10) * 10} m away`] : ["i-shield", "No staffed place within 1 km"],
     ];
     const html = `<div class="peek"><div class="peek-top"><b>${esc(name)}</b><span class="band ${s.risk_band}">${BAND_TEXT[s.risk_band]}</span></div>` +
-      `<ul>${rows.map(([ic, t]) => `<li><svg><use href="#${ic}"/></svg><span>${t}</span></li>`).join("")}</ul>` +
+      `<ul>${rows.filter(Boolean).map(([ic, t]) => `<li><svg><use href="#${ic}"/></svg><span>${t}</span></li>`).join("")}</ul>` +
       `<button class="peek-more">More details</button></div>`;
     if (peekPopup) map.closePopup(peekPopup);
     peekPopup = L.popup({ className: "peek-pop", closeButton: true, autoPanPaddingTopLeft: [12, 80], autoPanPaddingBottomRight: [12, 40], maxWidth: 290 })
@@ -1070,6 +1108,7 @@
         `Police UK, locations approximate${crimePeriod ? ", " + crimePeriod : ""}`],
       ["Higher-risk stretches", highM >= 10 ? `${Math.round(highM)} m` : "None", "Athena model"],
       ["Risk unknown", unknownM >= 10 ? `${Math.round(unknownM)} m of the walk` + [noLightM >= 10 ? `${Math.round(noLightM)} m with no lighting record` : "", noCrimeM >= 10 ? `${Math.round(noCrimeM)} m outside the police data area` : ""].filter(Boolean).map((x, i) => (i ? ", " : ": ") + x).join("") : "None", "OpenStreetMap lit tags, Police UK coverage"],
+      ["Parks and woods", walkedM(r, (x) => x.in_green === true) >= 20 ? `${Math.round(walkedM(r, (x) => x.in_green === true))} m of this walk is on footpaths through parks or woods` : "None on this route", "OpenStreetMap park and woodland areas"],
       ["Staffed places passed", passed.length ? passed.map((h) => `${h.name} (${h.hours})`).join("; ") : "None within 150 m", "Hand-checked list, hours may change"],
     ];
     $("route-detail").innerHTML =
@@ -1280,11 +1319,14 @@
       `<div style="padding:14px 0 4px"><p class="row-title">Path surface</p><p class="row-sub">${covTxt(cov.surface_known_pct)}</p>` +
       `<div class="segmented" role="radiogroup" aria-label="Path surface">${[["paved", "Paved only"], ["mixed", "Mostly paved"], ["any", "Any"]].map(([v, l]) =>
         `<label><input type="radio" name="terrain" value="${v}" ${p.terrain === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>` +
+      `<div style="padding:14px 0 4px"><p class="row-title">Parks and woods</p><p class="row-sub" style="white-space:normal">Footpaths through parks, woods and commons. Roads across them aren’t affected.</p>` +
+      `<div class="segmented" role="radiogroup" aria-label="Parks and woods">${[["avoid", "Avoid"], ["reduce", "If much shorter"], ["any", "Don’t mind"]].map(([v, l]) =>
+        `<label><input type="radio" name="green" value="${v}" ${(p.green || "reduce") === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>` +
       rideFormHTML();
   }
   function rideFormHTML() {
     const rs = rideSettings();
-    const opt = (name, list, cur) => `<div class="segmented" role="radiogroup">${list.map(([v, l]) =>
+    const opt = (name, list, cur) => `<div class="segmented${list.length > 3 ? " two-rows" : ""}" role="radiogroup">${list.map(([v, l]) =>
       `<label><input type="radio" name="${name}" value="${v}" ${String(cur) === String(v) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
     return `<div style="padding:18px 0 4px"><p class="row-title">Suggest a ride</p><p class="row-sub">Shows Uber and Bolt under your routes.</p>` +
       opt("ride-mode", [["long", "Long walks"], ["long_or_risky", "Long or risky"], ["risky", "Risky only"], ["off", "Never"]], rs.mode) +
@@ -1302,6 +1344,7 @@
       avoid_steep: root.querySelector("#pref-steep").checked,
       sheltered: root.querySelector("#pref-sheltered").checked,
       terrain: (root.querySelector("input[name=terrain]:checked") || {}).value || "mixed",
+      green: (root.querySelector("input[name=green]:checked") || {}).value || "reduce",
     };
   }
   function openPrefs() {
@@ -1330,7 +1373,7 @@
       (!standalone && (installEvent || ios) ? groupHTML([{ id: "a-install", icon: "i-download", title: "Add to Home Screen", sub: ios ? "In Safari: Share, then Add to Home Screen" : "Opens full-screen and works offline", tone: "accent" }]) : "") +
       `<h3 class="section">Settings</h3>` +
       groupHTML([
-        { id: "a-prefs", icon: "i-sliders", title: "Preferences", sub: "Lighting, stairs, slopes, ride suggestions" },
+        { id: "a-prefs", icon: "i-sliders", title: "Preferences", sub: "Lighting, parks, stairs, ride suggestions" },
         { id: "a-welcome", icon: "i-replay", title: "Show the introduction", sub: "How to read the map" },
       ]) +
       `<h3 class="section">How it works</h3>` +

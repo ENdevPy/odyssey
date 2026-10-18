@@ -90,6 +90,9 @@ const FIX = [
   [{lighting:"yes", highway_type:"footway", steep:null, covered:null, surface:"unpaved"}, {terrain:"mixed"}, 1.3],
   [{lighting:"no", highway_type:"steps", steep:true, covered:true, surface:"unpaved"}, {}, 3.9],
   [{lighting:"yes", highway_type:"footway", steep:null, covered:null, surface:"unpaved"}, {well_lit:false, terrain:"any"}, 1.0],
+  [{lighting:"yes", highway_type:"footway", steep:null, covered:null, surface:"paved", in_green:true}, {green:"avoid"}, 6.0],
+  [{lighting:"yes", highway_type:"footway", steep:null, covered:null, surface:"paved", in_green:true}, {}, 2.0],
+  [{lighting:"yes", highway_type:"footway", steep:null, covered:null, surface:"paved", in_green:true}, {green:"any"}, 1.0],
 ];
 for (const [edge, prefs, want] of FIX) {
   const got = core.edgeMultiplier(edge, { ...core.DEFAULT_PREFS, ...prefs });
@@ -97,7 +100,7 @@ for (const [edge, prefs, want] of FIX) {
 }
 const chips = core.explanationFactors(
   [{lighting:"yes", highway_type:"residential"}, {lighting:"no", highway_type:"footway", surface:"unpaved"}],
-  { ...core.DEFAULT_PREFS, terrain: "paved" });
+  { ...core.DEFAULT_PREFS, terrain: "paved", green: "any" });
 console.log("  chips:", chips.join(" | "));
 if (chips.join() !== "unlit stretch unavoidable,unpaved unavoidable") { console.log("  !! chips mismatch vs preferences.py fixture"); fail++; }
 

@@ -63,6 +63,7 @@ const DEFAULT_PREFS = {
   sheltered: false,        // prefer covered/sheltered segments
   terrain: "mixed",        // "paved" | "mixed" | "any"
   avoid_waterside: false,  // set live by the app near high tide or during a local flood warning
+  green: "reduce",         // footpaths through parks and woods: "avoid" | "reduce" | "any"
 };
 function loadPrefs() {
   try {
@@ -80,6 +81,9 @@ function edgeMultiplier(seg, prefs) {
   if (prefs.terrain === "paved" && seg.surface === "unpaved") m *= 2.5;
   if (prefs.terrain === "mixed" && seg.surface === "unpaved") m *= 1.3;
   if (prefs.avoid_waterside && seg.tide_exposed === true) m *= 4.0;
+  // in_green: a footpath through a park or wood (marked by the app from the OSM basemap)
+  if (prefs.green === "avoid" && seg.in_green === true) m *= 6.0;
+  if (prefs.green === "reduce" && seg.in_green === true) m *= 2.0;
   return m;                       // unknown values are never penalised
 }
 function explanationFactors(segments, prefs) {
@@ -95,6 +99,8 @@ function explanationFactors(segments, prefs) {
     out.push(has(s => s.covered === true) ? "sheltered stretch" : "no sheltered cover mapped");
   if (prefs.terrain === "paved")
     out.push(has(s => s.surface === "unpaved") ? "unpaved unavoidable" : "paved terrain");
+  if (prefs.green === "avoid" || prefs.green === "reduce")
+    out.push(has(s => s.in_green === true) ? "park or wood unavoidable" : "no parks or woods");
   return out;
 }
 

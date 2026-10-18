@@ -26,6 +26,7 @@ class UserPrefs:
     sheltered: bool = False        # prefer covered/sheltered segments
     terrain: str = "mixed"         # "paved" | "mixed" | "any"
     avoid_waterside: bool = False  # set live near high tide / local flood warning
+    green: str = "reduce"          # parks and woods: "avoid" | "reduce" | "any"
 
     @staticmethod
     def load(raw=None):
@@ -50,6 +51,8 @@ PREFS_MULTS = {
     "paved_unpaved": 2.5,   # terrain == "paved" && surface == "unpaved"
     "mixed_unpaved": 1.3,   # terrain == "mixed" && surface == "unpaved"
     "waterside": 4.0,       # avoid_waterside && tide_exposed is True
+    "green_avoid": 6.0,     # green == "avoid" && in_green is True
+    "green_reduce": 2.0,    # green == "reduce" && in_green is True
 }
 
 
@@ -71,6 +74,10 @@ def edge_multiplier(edge_data: dict, prefs: UserPrefs) -> float:
         m *= PREFS_MULTS["mixed_unpaved"]
     if prefs.avoid_waterside and edge_data.get("tide_exposed") is True:
         m *= PREFS_MULTS["waterside"]
+    if prefs.green == "avoid" and edge_data.get("in_green") is True:
+        m *= PREFS_MULTS["green_avoid"]
+    if prefs.green == "reduce" and edge_data.get("in_green") is True:
+        m *= PREFS_MULTS["green_reduce"]
     return m
 
 
@@ -94,6 +101,9 @@ def explanation_factors(route_segments: list, prefs: UserPrefs) -> list:
     if prefs.terrain == "paved":
         out.append("unpaved unavoidable" if has(lambda s: s.get("surface") == "unpaved")
                    else "paved terrain")
+    if prefs.green in ("avoid", "reduce"):
+        out.append("park or wood unavoidable" if has(lambda s: s.get("in_green") is True)
+                   else "no parks or woods")
     return out
 
 
@@ -118,6 +128,12 @@ FIXTURES = [
      {}, 3.9),          # defaults: well_lit on (x3) + mixed terrain (x1.3)
     ({"lighting": "yes", "highway_type": "footway", "steep": None, "covered": None, "surface": "unpaved"},
      {"well_lit": False, "terrain": "any"}, 1.0),
+    ({"lighting": "yes", "highway_type": "footway", "steep": None, "covered": None, "surface": "paved", "in_green": True},
+     {"green": "avoid"}, 6.0),
+    ({"lighting": "yes", "highway_type": "footway", "steep": None, "covered": None, "surface": "paved", "in_green": True},
+     {}, 2.0),          # default: parks and woods "reduce"
+    ({"lighting": "yes", "highway_type": "footway", "steep": None, "covered": None, "surface": "paved", "in_green": True},
+     {"green": "any"}, 1.0),
 ]
 
 
@@ -127,7 +143,7 @@ def _selftest():
         assert abs(got - want) < 1e-9, (edge, raw, got, want)
     segs = [{"lighting": "yes", "highway_type": "residential"},
             {"lighting": "no", "highway_type": "footway", "surface": "unpaved"}]
-    p = UserPrefs.load({"well_lit": True, "terrain": "paved"})
+    p = UserPrefs.load({"well_lit": True, "terrain": "paved", "green": "any"})
     assert explanation_factors(segs, p) == ["unlit stretch unavoidable", "unpaved unavoidable"], \
         explanation_factors(segs, p)
     print(f"preferences.py self-test OK: {len(FIXTURES)} multiplier vectors + explanations")
